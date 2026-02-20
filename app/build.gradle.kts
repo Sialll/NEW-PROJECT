@@ -4,19 +4,43 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val releaseStoreFile = providers.gradleProperty("MM_RELEASE_STORE_FILE")
+    .orElse(providers.environmentVariable("MM_RELEASE_STORE_FILE"))
+val releaseStorePassword = providers.gradleProperty("MM_RELEASE_STORE_PASSWORD")
+    .orElse(providers.environmentVariable("MM_RELEASE_STORE_PASSWORD"))
+val releaseKeyAlias = providers.gradleProperty("MM_RELEASE_KEY_ALIAS")
+    .orElse(providers.environmentVariable("MM_RELEASE_KEY_ALIAS"))
+    .orElse("moneymind")
+val releaseKeyPassword = providers.gradleProperty("MM_RELEASE_KEY_PASSWORD")
+    .orElse(providers.environmentVariable("MM_RELEASE_KEY_PASSWORD"))
+
+val hasReleaseSigning = releaseStoreFile.isPresent &&
+    releaseStorePassword.isPresent &&
+    releaseKeyPassword.isPresent
+
+if (!hasReleaseSigning) {
+    logger.lifecycle(
+        "Release signing is not configured. Set MM_RELEASE_STORE_FILE, " +
+            "MM_RELEASE_STORE_PASSWORD, MM_RELEASE_KEY_PASSWORD " +
+            "(optional: MM_RELEASE_KEY_ALIAS)."
+    )
+}
+
 android {
     namespace = "com.example.moneymind"
     compileSdk = 35
 
     signingConfigs {
-        create("installCompat") {
-            storeFile = file("C:/temp/moneymind-release.jks")
-            storePassword = "moneymind2026"
-            keyAlias = "moneymind"
-            keyPassword = "moneymind2026"
-            enableV1Signing = true
-            enableV2Signing = true
-            enableV3Signing = true
+        if (hasReleaseSigning) {
+            create("installCompat") {
+                storeFile = file(releaseStoreFile.get())
+                storePassword = releaseStorePassword.get()
+                keyAlias = releaseKeyAlias.get()
+                keyPassword = releaseKeyPassword.get()
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
         }
     }
 
@@ -58,7 +82,9 @@ android {
         release {
             applicationIdSuffix = ".install"
             versionNameSuffix = "-install"
-            signingConfig = signingConfigs.getByName("installCompat")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("installCompat")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -69,7 +95,9 @@ android {
             initWith(getByName("release"))
             applicationIdSuffix = ""
             versionNameSuffix = ""
-            signingConfig = signingConfigs.getByName("installCompat")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("installCompat")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             ndk {
