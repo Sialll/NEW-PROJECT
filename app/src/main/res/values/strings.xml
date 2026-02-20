@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MoneyMind</string>
+    <string name="notification_service_name">가계부 알림 리스너</string>
+</resources>

@@ -1,0 +1,22 @@
+# Gradle / Android build outputs
+.gradle/
+**/build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Signing / secrets
+*.jks
+*.keystore
+PLAY_UPLOAD_KEY_INFO.txt
+
+# Local helper artifacts
+*.sql
+hyundai_seed_preview.csv
+
