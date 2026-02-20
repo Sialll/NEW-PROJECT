@@ -63,6 +63,24 @@ DB 스키마 업데이트는 마이그레이션(1 -> 2)으로 처리하여 기�
 ## 빌드 참고
 
 - OneDrive 경로 잠금 이슈를 피하기 위해 Gradle 빌드 산출물은 `C:/temp/moneymind-build` 아래에 생성됩니다.
+- 빌드 속도 최적화를 위해 Gradle 캐시/병렬 실행을 활성화했습니다.
+
+## GitHub 운영 정리
+
+- 기본 브랜치: `main`
+- CI: `.github/workflows/android-ci.yml`
+  - `testSafeDebugUnitTest`
+  - `assembleSafeDebug`
+- 협업 규칙: `CONTRIBUTING.md`
+
+## 개발 루틴 (빠른 점검)
+
+PowerShell에서:
+
+```powershell
+./scripts/dev-check.ps1
+./scripts/dev-check.ps1 -Build
+```
 
 ## 다음 보강 추천
 

@@ -49,8 +49,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -630,37 +632,66 @@ private fun LedgerBackPage(
     val normalizedKeyword = keywordFilter.trim().lowercase()
     val normalizedCategory = categoryFilter.trim()
 
-    val monthEntriesBase = state.entries
-        .filter { YearMonth.from(it.occurredAt) == month }
-        .filter { entry ->
-            if (fromDay != null && entry.occurredAt.dayOfMonth < fromDay) return@filter false
-            if (toDay != null && entry.occurredAt.dayOfMonth > toDay) return@filter false
-            true
+    val monthEntriesBase by remember(
+        state.entries,
+        month,
+        fromDay,
+        toDay,
+        normalizedKeyword,
+        typeFilter,
+        paymentFilter
+    ) {
+        derivedStateOf {
+            state.entries
+                .asSequence()
+                .filter { YearMonth.from(it.occurredAt) == month }
+                .filter { entry ->
+                    if (fromDay != null && entry.occurredAt.dayOfMonth < fromDay) return@filter false
+                    if (toDay != null && entry.occurredAt.dayOfMonth > toDay) return@filter false
+                    true
+                }
+                .filter { entry ->
+                    if (normalizedKeyword.isBlank()) return@filter true
+                    val merged = "${entry.description.lowercase()} ${entry.merchant.orEmpty().lowercase()} ${entry.category.lowercase()}"
+                    merged.contains(normalizedKeyword)
+                }
+                .filter { entry -> matchesTypeFilter(entry, typeFilter) }
+                .filter { entry -> matchesPaymentFilter(entry, paymentFilter) }
+                .sortedByDescending { it.occurredAt }
+                .toList()
         }
-        .filter { entry ->
-            if (normalizedKeyword.isBlank()) return@filter true
-            val merged = "${entry.description.lowercase()} ${entry.merchant.orEmpty().lowercase()} ${entry.category.lowercase()}"
-            merged.contains(normalizedKeyword)
+    }
+
+    val monthEntries by remember(monthEntriesBase, normalizedCategory) {
+        derivedStateOf {
+            monthEntriesBase.filter { entry ->
+                normalizedCategory.isBlank() || entry.category == normalizedCategory
+            }
         }
-        .filter { entry -> matchesTypeFilter(entry, typeFilter) }
-        .filter { entry -> matchesPaymentFilter(entry, paymentFilter) }
-        .sortedByDescending { it.occurredAt }
+    }
 
-    val monthEntries = monthEntriesBase
-        .filter { entry -> normalizedCategory.isBlank() || entry.category == normalizedCategory }
+    val categories by remember(monthEntriesBase) {
+        derivedStateOf {
+            monthEntriesBase
+                .asSequence()
+                .map { it.category }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .sorted()
+                .toList()
+        }
+    }
 
-    val categories = monthEntriesBase
-        .asSequence()
-        .map { it.category }
-        .filter { it.isNotBlank() }
-        .distinct()
-        .sorted()
-        .toList()
-
-    val daySummaryMap = buildDaySummaryMap(monthEntries)
-    val selectedDayEntries = monthEntries
-        .filter { it.occurredAt.dayOfMonth == selectedDayOfMonth }
-        .sortedByDescending { it.occurredAt }
+    val daySummaryMap by remember(monthEntries) {
+        derivedStateOf { buildDaySummaryMap(monthEntries) }
+    }
+    val selectedDayEntries by remember(monthEntries, selectedDayOfMonth) {
+        derivedStateOf {
+            monthEntries
+                .filter { it.occurredAt.dayOfMonth == selectedDayOfMonth }
+                .sortedByDescending { it.occurredAt }
+        }
+    }
 
     LaunchedEffect(monthEntries, selectedDayEntries) {
         val highlighted = highlightedEntryId ?: return@LaunchedEffect
@@ -1211,8 +1242,8 @@ private fun CategoryJumpBarChartCard(
     selectedCategory: String,
     onSelectCategory: (String) -> Unit
 ) {
-    val points = buildCategoryExpenseChartPoints(entries)
-    val maxAmount = points.maxOfOrNull { it.amount }?.toFloat()?.coerceAtLeast(1f) ?: 1f
+    val points = remember(entries) { buildCategoryExpenseChartPoints(entries) }
+    val maxAmount = remember(points) { points.maxOfOrNull { it.amount }?.toFloat()?.coerceAtLeast(1f) ?: 1f }
     var chartWidthPx by rememberSaveable { mutableStateOf(1f) }
 
     Card(
@@ -2212,7 +2243,9 @@ private fun BudgetHeroCard(summary: MonthlySummary, entries: List<LedgerEntry>) 
     val baseAmount = if (summary.income > 0L) summary.income else max(summary.expense, 1L)
     val remaining = if (summary.income > 0L) summary.income - summary.expense else 0L
     val progress = (used.toDouble() / baseAmount.toDouble()).toFloat().coerceIn(0f, 1f)
-    val chartData = buildUsageChartData(entries = entries, month = month, income = summary.income)
+    val chartData = remember(entries, month, summary.income) {
+        buildUsageChartData(entries = entries, month = month, income = summary.income)
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -2305,16 +2338,36 @@ private fun buildUsageChartData(entries: List<LedgerEntry>, month: YearMonth, in
     return UsageChartData(usedSeries = usedSeries, remainingSeries = remainingSeries)
 }
 
+private data class MonthlyFlowAccumulator(
+    var income: Long = 0L,
+    var expense: Long = 0L
+)
+
 private fun buildMonthlyFlowPoints(entries: List<LedgerEntry>, endMonth: YearMonth, months: Int = 6): List<MonthlyFlowPoint> {
     if (months <= 0) return emptyList()
+    val startMonth = endMonth.minusMonths((months - 1).toLong())
+    val monthMap = hashMapOf<YearMonth, MonthlyFlowAccumulator>()
+
+    entries.forEach { entry ->
+        val month = YearMonth.from(entry.occurredAt)
+        if (month < startMonth || month > endMonth) return@forEach
+
+        val acc = monthMap.getOrPut(month) { MonthlyFlowAccumulator() }
+        when (entry.type) {
+            EntryType.INCOME -> acc.income += entry.amount
+            EntryType.EXPENSE -> if (entry.countedInExpense) acc.expense += entry.amount
+            EntryType.TRANSFER -> Unit
+        }
+    }
+
     return (months - 1 downTo 0).map { index ->
         val month = endMonth.minusMonths(index.toLong())
-        val monthEntries = entries.filter { YearMonth.from(it.occurredAt) == month }
-        val income = monthEntries.filter { it.type == EntryType.INCOME }.sumOf { it.amount }
-        val expense = monthEntries
-            .filter { it.type == EntryType.EXPENSE && it.countedInExpense }
-            .sumOf { it.amount }
-        MonthlyFlowPoint(month = month, income = income, expense = expense)
+        val acc = monthMap[month]
+        MonthlyFlowPoint(
+            month = month,
+            income = acc?.income ?: 0L,
+            expense = acc?.expense ?: 0L
+        )
     }
 }
 
@@ -2357,8 +2410,8 @@ private fun buildCategorySlices(entries: List<LedgerEntry>, month: YearMonth): L
 
 @Composable
 private fun MonthlyFlowBarChartCard(entries: List<LedgerEntry>, month: YearMonth) {
-    val points = buildMonthlyFlowPoints(entries = entries, endMonth = month)
-    val maxValue = points.maxOfOrNull { max(it.income, it.expense) }?.toFloat()?.coerceAtLeast(1f) ?: 1f
+    val points = remember(entries, month) { buildMonthlyFlowPoints(entries = entries, endMonth = month) }
+    val maxValue = remember(points) { points.maxOfOrNull { max(it.income, it.expense) }?.toFloat()?.coerceAtLeast(1f) ?: 1f }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -2448,8 +2501,8 @@ private fun MonthlyFlowBarChartCard(entries: List<LedgerEntry>, month: YearMonth
 
 @Composable
 private fun CategoryShareDonutCard(entries: List<LedgerEntry>, month: YearMonth) {
-    val slices = buildCategorySlices(entries = entries, month = month)
-    val total = slices.sumOf { it.amount }
+    val slices = remember(entries, month) { buildCategorySlices(entries = entries, month = month) }
+    val total = remember(slices) { slices.sumOf { it.amount } }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
