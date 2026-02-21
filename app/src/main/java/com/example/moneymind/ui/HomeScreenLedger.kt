@@ -604,33 +604,44 @@ private fun CalendarLedgerSection(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF3F4F6))
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFFFF)),
+        border = BorderStroke(1.dp, Color(0xFFD7DCE5))
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
                 "${month.year}년 ${month.monthValue}월 달력",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.ExtraBold
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF111827)
             )
 
-            Row(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 2.dp)
+            ) {
                 weekNames.forEachIndexed { index, dayName ->
                     val dayColor = when (index) {
-                        0 -> Color(0xFFD97706)
-                        6 -> Color(0xFF64748B)
+                        0 -> Color(0xFFDC2626)
+                        6 -> Color(0xFF2563EB)
                         else -> Color(0xFF6B7280)
                     }
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .padding(vertical = 4.dp),
+                            .padding(vertical = 2.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(dayName, color = dayColor, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = dayName,
+                            color = dayColor,
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.labelMedium
+                        )
                     }
                 }
             }
@@ -643,6 +654,7 @@ private fun CalendarLedgerSection(
                         if (day in 1..daysInMonth) {
                             CalendarDayCell(
                                 modifier = Modifier.weight(1f),
+                                month = month,
                                 day = day,
                                 weekDayIndex = indexInWeek,
                                 summary = daySummaryMap[day],
@@ -653,8 +665,8 @@ private fun CalendarLedgerSection(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .padding(2.dp)
-                                    .height(88.dp)
+                                    .padding(1.dp)
+                                    .height(86.dp)
                             )
                         }
                     }
@@ -667,86 +679,137 @@ private fun CalendarLedgerSection(
 @Composable
 private fun CalendarDayCell(
     modifier: Modifier,
+    month: YearMonth,
     day: Int,
     weekDayIndex: Int,
     summary: DayLedgerSummary?,
     selected: Boolean,
     onClick: () -> Unit
 ) {
+    val isToday = month == YearMonth.now() && day == LocalDate.now().dayOfMonth
     val dayNumberColor = when (weekDayIndex) {
-        0 -> Color(0xFFD97706)
-        6 -> Color(0xFF334155)
+        0 -> Color(0xFFDC2626)
+        6 -> Color(0xFF2563EB)
         else -> Color(0xFF111827)
     }
     Card(
-        modifier = modifier.padding(2.dp),
-        shape = RoundedCornerShape(8.dp),
+        modifier = modifier.padding(1.dp),
+        shape = RoundedCornerShape(6.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (selected) Color(0xFFE8F2FF) else Color(0xFFFFFFFF)
+            containerColor = when {
+                selected -> Color(0xFFEAF2FF)
+                isToday -> Color(0xFFF8FBFF)
+                else -> Color(0xFFFFFFFF)
+            }
         ),
         border = BorderStroke(
-            width = if (selected) 1.5.dp else 1.dp,
-            color = if (selected) Color(0xFF5B7CB0) else Color(0xFFD5DBE3)
+            width = if (selected) 1.5.dp else 0.8.dp,
+            color = when {
+                selected -> Color(0xFF4B73B9)
+                isToday -> Color(0xFFA6BFEB)
+                else -> Color(0xFFE2E8F0)
+            }
         ),
         onClick = onClick
     ) {
-        val amountLine = remember(summary) { buildCalendarAmountLine(summary) }
+        val cell = remember(summary) { buildCalendarDayCellText(summary) }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(88.dp)
-                .padding(horizontal = 6.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+                .height(86.dp)
+                .padding(horizontal = 6.dp, vertical = 5.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Text(day.toString(), fontWeight = FontWeight.ExtraBold, color = dayNumberColor)
-            Text(
-                text = amountLine.text,
-                style = MaterialTheme.typography.labelSmall,
-                color = amountLine.color,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = day.toString(),
+                    fontWeight = if (isToday) FontWeight.ExtraBold else FontWeight.Bold,
+                    color = dayNumberColor,
+                    style = MaterialTheme.typography.labelLarge
+                )
+                if (isToday) {
+                    Text(
+                        text = "오늘",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF2563EB),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            if (cell.expenseText == null && cell.incomeText == null) {
+                Text(
+                    text = "-",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF9CA3AF),
+                    fontWeight = FontWeight.SemiBold
+                )
+            } else {
+                if (cell.expenseText != null) {
+                    Text(
+                        text = "소비 ${cell.expenseText}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFB42318),
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (cell.incomeText != null) {
+                    Text(
+                        text = "수입 ${cell.incomeText}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF067647),
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
     }
 }
 
-private data class CalendarAmountLine(
-    val text: String,
-    val color: Color
+private data class CalendarDayCellText(
+    val expenseText: String?,
+    val incomeText: String?
 )
 
-private fun buildCalendarAmountLine(summary: DayLedgerSummary?): CalendarAmountLine {
+private fun buildCalendarDayCellText(summary: DayLedgerSummary?): CalendarDayCellText {
     if (summary == null) {
-        return CalendarAmountLine(
-            text = "-",
-            color = Color(0xFF94A3B8)
+        return CalendarDayCellText(
+            expenseText = null,
+            incomeText = null
         )
     }
 
-    val hasExpense = summary.expense > 0L
-    val hasIncome = summary.income > 0L
+    val expenseText = if (summary.expense > 0L) {
+        "-${formatCalendarAmountCompact(summary.expense)}"
+    } else {
+        null
+    }
+    val incomeText = if (summary.income > 0L) {
+        "+${formatCalendarAmountCompact(summary.income)}"
+    } else {
+        null
+    }
 
+    return CalendarDayCellText(
+        expenseText = expenseText,
+        incomeText = incomeText
+    )
+}
+
+private fun formatCalendarAmountCompact(amount: Long): String {
+    val absAmount = kotlin.math.abs(amount)
     return when {
-        hasExpense && hasIncome -> CalendarAmountLine(
-            text = "소비 ${formatCalendarAmount(summary.expense)} · 수입 ${formatCalendarAmount(summary.income)}",
-            color = Color(0xFF334155)
-        )
-
-        hasExpense -> CalendarAmountLine(
-            text = "소비 ${formatCalendarAmount(summary.expense)}",
-            color = Color(0xFFB33232)
-        )
-
-        hasIncome -> CalendarAmountLine(
-            text = "수입 ${formatCalendarAmount(summary.income)}",
-            color = Color(0xFF1C7A4F)
-        )
-
-        else -> CalendarAmountLine(
-            text = "-",
-            color = Color(0xFF94A3B8)
-        )
+        absAmount >= 100_000_000L -> String.format(Locale.KOREA, "%.1f억", absAmount / 100_000_000.0)
+        absAmount >= 10_000L -> String.format(Locale.KOREA, "%.1f만", absAmount / 10_000.0)
+        else -> String.format(Locale.KOREA, "%,d", absAmount)
     }
 }
 
@@ -998,10 +1061,6 @@ private data class CategoryExpenseChartPoint(
     val amount: Long,
     val color: Color
 )
-
-private fun formatCalendarAmount(amount: Long): String {
-    return String.format(Locale.KOREA, "%,d", amount)
-}
 
 private fun buildDaySummaryMap(entries: List<LedgerEntry>): Map<Int, DayLedgerSummary> {
     val map = mutableMapOf<Int, DayLedgerSummary>()
