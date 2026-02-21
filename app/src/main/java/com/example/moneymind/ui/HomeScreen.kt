@@ -52,6 +52,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -161,7 +162,7 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
 
     var optionSectionName by rememberSaveable { mutableStateOf(OptionSection.FILE.name) }
     var ledgerViewModeName by rememberSaveable { mutableStateOf(LedgerViewMode.CALENDAR.name) }
-    var selectedDayOfMonth by rememberSaveable { mutableStateOf(LocalDate.now().dayOfMonth) }
+    var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(LocalDate.now().dayOfMonth) }
     var checkedEntryIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
     var pendingExportType by rememberSaveable { mutableStateOf(CsvExportType.ANALYSIS.name) }
     var showSmsPermissionDialog by rememberSaveable { mutableStateOf(false) }

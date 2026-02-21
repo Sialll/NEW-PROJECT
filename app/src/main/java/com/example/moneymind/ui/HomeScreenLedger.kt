@@ -50,6 +50,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -125,7 +127,7 @@ internal fun LedgerBackPage(
     onDeleteTemplate: (String) -> Unit,
     onRefreshRecurring: () -> Unit
 ) {
-    var monthOffset by rememberSaveable { mutableStateOf(0) }
+    var monthOffset by rememberSaveable { mutableIntStateOf(0) }
     var keywordFilter by rememberSaveable { mutableStateOf("") }
     var typeFilterName by rememberSaveable { mutableStateOf(EntryTypeFilter.ALL.name) }
     var paymentFilterName by rememberSaveable { mutableStateOf(PaymentMethodFilter.ALL.name) }
@@ -759,7 +761,7 @@ private fun DailyExpenseJumpChartCard(
     val days = month.lengthOfMonth().coerceAtLeast(1)
     val expenseSeries = (1..days).map { day -> daySummaryMap[day]?.expense ?: 0L }
     val maxExpense = expenseSeries.maxOrNull()?.toFloat()?.coerceAtLeast(1f) ?: 1f
-    var chartWidthPx by rememberSaveable { mutableStateOf(1f) }
+    var chartWidthPx by rememberSaveable { mutableFloatStateOf(1f) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -846,7 +848,7 @@ private fun CategoryJumpBarChartCard(
 ) {
     val points = remember(entries) { buildCategoryExpenseChartPoints(entries) }
     val maxAmount = remember(points) { points.maxOfOrNull { it.amount }?.toFloat()?.coerceAtLeast(1f) ?: 1f }
-    var chartWidthPx by rememberSaveable { mutableStateOf(1f) }
+    var chartWidthPx by rememberSaveable { mutableFloatStateOf(1f) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
