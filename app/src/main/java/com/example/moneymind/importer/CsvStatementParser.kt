@@ -16,7 +16,7 @@ class CsvStatementParser : StatementParser {
     override suspend fun parse(context: Context, uri: Uri, sourceName: String): List<ParsedRecord> {
         return withContext(Dispatchers.IO) {
             context.contentResolver.openInputStream(uri)?.use { input ->
-                val text = input.bufferedReader().use { it.readText() }
+                val text = input.bufferedReader().use { it.readText() }.removePrefix("\uFEFF")
                 if (text.isBlank()) return@use emptyList()
 
                 val lines = text.lineSequence().map { it.trimEnd('\r') }.toList()
@@ -103,6 +103,7 @@ class CsvStatementParser : StatementParser {
 
     private fun normalizeToken(value: String): String {
         return value.trim().lowercase()
+            .replace("\uFEFF", "")
             .replace(" ", "")
             .replace("_", "")
             .replace("-", "")

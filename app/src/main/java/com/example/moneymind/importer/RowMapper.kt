@@ -276,6 +276,7 @@ object RowMapper {
 
     private fun normalizeKey(value: String): String {
         return value.lowercase()
+            .replace("\uFEFF", "")
             .replace(" ", "")
             .replace("_", "")
             .replace("-", "")

@@ -303,6 +303,7 @@ class ExcelStatementParser : StatementParser {
 
     private fun normalizeHeaderToken(value: String): String {
         return value.trim().lowercase()
+            .replace("\uFEFF", "")
             .replace(" ", "")
             .replace("_", "")
             .replace("-", "")
@@ -406,6 +407,7 @@ class ExcelStatementParser : StatementParser {
 
         private fun normalizeToken(token: String): String {
             return token.lowercase()
+                .replace("\uFEFF", "")
                 .replace(" ", "")
                 .replace("_", "")
                 .replace("-", "")
