@@ -1,5 +1,6 @@
 ﻿package com.example.moneymind.ui
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
@@ -91,7 +92,6 @@ import kotlin.math.roundToInt
 
 internal enum class OptionSection {
     FILE,
-    MANUAL,
     PROFILE,
     CONTROL
 }
@@ -147,10 +147,6 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
     val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
 
-    var aliasInput by rememberSaveable { mutableStateOf("") }
-    var bankInput by rememberSaveable { mutableStateOf("") }
-    var accountInput by rememberSaveable { mutableStateOf("") }
-    var ownerInput by rememberSaveable { mutableStateOf("") }
     var cardLast4Input by rememberSaveable { mutableStateOf("") }
     var installmentMerchantInput by rememberSaveable { mutableStateOf("") }
     var monthlyAmountInput by rememberSaveable { mutableStateOf("") }
@@ -168,6 +164,8 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
     var selectedDayOfMonth by rememberSaveable { mutableStateOf(LocalDate.now().dayOfMonth) }
     var checkedEntryIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
     var pendingExportType by rememberSaveable { mutableStateOf(CsvExportType.ANALYSIS.name) }
+    var showSmsPermissionDialog by rememberSaveable { mutableStateOf(false) }
+    var smsPromptShownInSession by rememberSaveable { mutableStateOf(false) }
 
     var editingEntryId by rememberSaveable { mutableStateOf<String?>(null) }
     var editTypeName by rememberSaveable { mutableStateOf(EntryType.EXPENSE.name) }
@@ -188,13 +186,27 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
 
     LaunchedEffect(Unit) {
         vm.refreshNotificationAccess()
+        vm.refreshSmsPermissionAccess()
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) vm.refreshNotificationAccess()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                vm.refreshNotificationAccess()
+                vm.refreshSmsPermissionAccess()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(state.smsPermissionGranted, state.notificationCaptureSupported) {
+        if (
+            !smsPromptShownInSession &&
+            state.notificationCaptureSupported &&
+            !state.smsPermissionGranted
+        ) {
+            showSmsPermissionDialog = true
+            smsPromptShownInSession = true
+        }
     }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -206,6 +218,9 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                 .getOrDefault(CsvExportType.ANALYSIS)
             vm.exportCsv(context, it, exportType)
         }
+    }
+    val smsPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        vm.refreshSmsPermissionAccess()
     }
 
     Scaffold(
@@ -250,6 +265,14 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                     viewMode = ledgerViewMode,
                     selectedDayOfMonth = selectedDayOfMonth,
                     checkedEntryIds = checkedEntryIds,
+                    manualType = manualType,
+                    manualKind = manualKind,
+                    manualAmount = manualAmount,
+                    manualDescription = manualDesc,
+                    manualMerchant = manualMerchant,
+                    manualCategory = manualCategory,
+                    categoryOptions = state.categoryOptions,
+                    pinnedCategories = state.pinnedCategories,
                     onViewModeChange = { ledgerViewModeName = it.name },
                     onSelectDay = { selectedDayOfMonth = it },
                     onToggleChecked = { id ->
@@ -271,22 +294,55 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                     onDeleteEntry = { entry ->
                         deleteTargetEntryId = entry.id
                         checkedEntryIds = checkedEntryIds - entry.id
-                    }
+                    },
+                    onManualTypeChange = {
+                        manualTypeName = it.name
+                        if (it != EntryType.EXPENSE) manualKindName = SpendingKind.NORMAL.name
+                    },
+                    onManualKindChange = { manualKindName = it.name },
+                    onManualAmountChange = { manualAmount = it.filter(Char::isDigit) },
+                    onManualDescriptionChange = { manualDesc = it },
+                    onManualMerchantChange = { manualMerchant = it },
+                    onManualCategoryChange = { manualCategory = it },
+                    onAddCategoryOption = vm::addCustomCategory,
+                    onToggleCategoryPin = vm::togglePinnedCategory,
+                    onSaveManual = {
+                        vm.addManualEntry(manualType, manualAmount, manualDesc, manualMerchant, manualCategory, manualKind)
+                        if (manualAmount.isNotBlank() && manualDesc.isNotBlank()) {
+                            manualAmount = ""
+                            manualDesc = ""
+                            manualMerchant = ""
+                            manualKindName = SpendingKind.NORMAL.name
+                        }
+                    },
+                    onLoadManualFromEntry = { entry ->
+                        manualTypeName = entry.type.name
+                        manualKindName = entry.spendingKind.name
+                        manualAmount = entry.amount.toString()
+                        manualDesc = entry.description
+                        manualMerchant = entry.merchant.orEmpty()
+                        manualCategory = entry.category
+                    },
+                    onSaveTemplate = { name, repeatDayText ->
+                        vm.saveQuickTemplate(
+                            name = name,
+                            type = manualType,
+                            amountText = manualAmount,
+                            description = manualDesc,
+                            merchant = manualMerchant,
+                            category = manualCategory,
+                            spendingKind = manualKind,
+                            repeatMonthlyDayText = repeatDayText
+                        )
+                    },
+                    onRunTemplate = vm::runQuickTemplateNow,
+                    onDeleteTemplate = vm::deleteQuickTemplate,
+                    onRefreshRecurring = vm::refreshRecurringEntries
                 )
                 else -> OptionsPage(
                     state = state,
                     optionSection = optionSection,
                     onOptionSectionChange = { optionSectionName = it.name },
-                    manualType = manualType,
-                    manualKind = manualKind,
-                    amount = manualAmount,
-                    description = manualDesc,
-                    merchant = manualMerchant,
-                    category = manualCategory,
-                    aliasInput = aliasInput,
-                    bankInput = bankInput,
-                    accountInput = accountInput,
-                    ownerInput = ownerInput,
                     cardLast4Input = cardLast4Input,
                     installmentMerchantInput = installmentMerchantInput,
                     monthlyAmountInput = monthlyAmountInput,
@@ -322,43 +378,10 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                     onInjectLoanNotification = {
                         vm.injectTestNotification(HomeViewModel.NotificationTestPreset.EXPENSE_LOAN)
                     },
-                    onTypeChange = {
-                        manualTypeName = it.name
-                        if (it != EntryType.EXPENSE) manualKindName = SpendingKind.NORMAL.name
-                    },
-                    onKindChange = { manualKindName = it.name },
-                    onAmountChange = { manualAmount = it.filter(Char::isDigit) },
-                    onDescriptionChange = { manualDesc = it },
-                    onMerchantChange = { manualMerchant = it },
-                    onCategoryChange = { manualCategory = it },
-                    onSaveManual = {
-                        vm.addManualEntry(manualType, manualAmount, manualDesc, manualMerchant, manualCategory, manualKind)
-                        if (manualAmount.isNotBlank() && manualDesc.isNotBlank()) {
-                            manualAmount = ""
-                            manualDesc = ""
-                            manualMerchant = ""
-                            manualCategory = ""
-                            manualKindName = SpendingKind.NORMAL.name
-                        }
-                    },
-                    onAliasChange = { aliasInput = it },
-                    onBankChange = { bankInput = it },
-                    onAccountChange = { accountInput = it },
-                    onOwnerChange = { ownerInput = it },
-                    onCardLast4Change = { cardLast4Input = it.filter(Char::isDigit).take(4) },
+                    onCardLast4Change = { cardLast4Input = it.take(24) },
                     onInstallmentMerchantChange = { installmentMerchantInput = it },
                     onMonthlyAmountChange = { monthlyAmountInput = it.filter(Char::isDigit) },
                     onInstallmentMonthsChange = { installmentMonthsInput = it.filter(Char::isDigit) },
-                    onSaveAlias = {
-                        vm.setOwnerAlias(aliasInput)
-                        aliasInput = ""
-                    },
-                    onSaveAccount = {
-                        vm.registerOwnedAccount(bankInput, accountInput, ownerInput)
-                        bankInput = ""
-                        accountInput = ""
-                        ownerInput = ""
-                    },
                     onSaveInstallment = {
                         vm.registerInstallment(
                             cardLast4 = cardLast4Input,
@@ -371,34 +394,10 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                         monthlyAmountInput = ""
                         installmentMonthsInput = ""
                     },
-                    onLoadManualFromEntry = { entry ->
-                        manualTypeName = entry.type.name
-                        manualKindName = entry.spendingKind.name
-                        manualAmount = entry.amount.toString()
-                        manualDesc = entry.description
-                        manualMerchant = entry.merchant.orEmpty()
-                        manualCategory = entry.category
-                    },
-                    onSaveTemplate = { name, repeatDayText ->
-                        vm.saveQuickTemplate(
-                            name = name,
-                            type = manualType,
-                            amountText = manualAmount,
-                            description = manualDesc,
-                            merchant = manualMerchant,
-                            category = manualCategory,
-                            spendingKind = manualKind,
-                            repeatMonthlyDayText = repeatDayText
-                        )
-                    },
-                    onRunTemplate = vm::runQuickTemplateNow,
-                    onDeleteTemplate = vm::deleteQuickTemplate,
-                    onRefreshRecurring = vm::refreshRecurringEntries,
                     onSetTotalBudget = vm::setTotalBudget,
-                    onSetCategoryBudget = vm::setCategoryBudget,
-                    onRemoveCategoryBudget = vm::removeCategoryBudget,
                     onCloseMonth = vm::closeCurrentMonth,
                     onSaveRule = vm::saveClassificationRule,
+                    onSaveNaturalRule = vm::saveNaturalLanguageRule,
                     onRemoveRule = vm::removeClassificationRule,
                     onCreateRuleFromEntry = vm::createRuleFromEntry
                 )
@@ -417,7 +416,7 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(
-                            EntryType.EXPENSE to "지출",
+                            EntryType.EXPENSE to "소비",
                             EntryType.INCOME to "수입",
                             EntryType.TRANSFER to "이체"
                         ).forEach { (type, label) ->
@@ -467,10 +466,12 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                         onValueChange = { editMerchant = it },
                         label = "가맹점/거래처 (선택)"
                     )
-                    CleanField(
+                    CategorySelectField(
                         value = editCategory,
                         onValueChange = { editCategory = it },
-                        label = "카테고리 (비우면 자동)"
+                        options = state.categoryOptions,
+                        onAddCategory = vm::addCustomCategory,
+                        label = "카테고리"
                     )
                 }
             },
@@ -527,5 +528,32 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
             }
         )
     }
-}
 
+    if (showSmsPermissionDialog && !state.smsPermissionGranted) {
+        AlertDialog(
+            onDismissRequest = { showSmsPermissionDialog = false },
+            title = { Text("SMS 접근 권한 요청") },
+            text = {
+                Text(
+                    "결제 문자 자동 수집 준비를 위해 SMS 읽기 권한을 요청합니다. " +
+                        "거부해도 앱 사용은 가능하고, 알림 수집은 계속 동작합니다."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSmsPermissionDialog = false
+                        smsPermissionLauncher.launch(Manifest.permission.READ_SMS)
+                    }
+                ) {
+                    Text("권한 요청")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSmsPermissionDialog = false }) {
+                    Text("나중에")
+                }
+            }
+        )
+    }
+}

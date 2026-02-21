@@ -2,6 +2,7 @@
 
 import com.example.moneymind.domain.EntrySource
 import com.example.moneymind.domain.ParsedRecord
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.MonthDay
@@ -47,19 +48,25 @@ object RowMapper {
         "amount",
         "total",
         "금액",
+        "금액원",
         "결제금액",
         "결제원금",
         "청구금액",
         "승인금액",
         "거래금액",
         "이용금액",
-        "사용금액"
+        "사용금액",
+        "출금",
+        "출금원",
+        "입금",
+        "입금원"
     )
     private val withdrawKeys = listOf(
         "withdraw",
         "debit",
         "출금",
         "출금액",
+        "출금원",
         "지출",
         "결제원금",
         "결제금액",
@@ -73,6 +80,7 @@ object RowMapper {
         "credit",
         "입금",
         "입금액",
+        "입금원",
         "입금금액",
         "수입",
         "환급금액"
@@ -182,9 +190,16 @@ object RowMapper {
         val parenthesizedNegative = cleaned.startsWith("(") && cleaned.endsWith(")")
         val explicitNegative = cleaned.startsWith("-") || cleaned.endsWith("-")
         val explicitPositive = cleaned.startsWith("+")
+        val numericBody = cleaned
+            .removePrefix("(")
+            .removeSuffix(")")
+            .removePrefix("-")
+            .removePrefix("+")
+            .removeSuffix("-")
 
-        val digits = cleaned.filter { it.isDigit() }
-        val value = digits.toLongOrNull() ?: return 0L
+        val value = numericBody.toLongOrNull() ?: runCatching {
+            BigDecimal(numericBody).toLong()
+        }.getOrNull() ?: return 0L
 
         return when {
             parenthesizedNegative || explicitNegative -> -value
@@ -237,32 +252,38 @@ object RowMapper {
     }
 
     private fun normalizeKeys(row: Map<String, String>): Map<String, String> {
-        return row.mapKeys { (key, _) ->
-            key.lowercase()
-                .replace(" ", "")
-                .replace("_", "")
-                .replace("-", "")
-                .replace("/", "")
-                .replace(".", "")
-                .replace(":", "")
-                .replace("(", "")
-                .replace(")", "")
-        }
+        return row.mapKeys { (key, _) -> normalizeKey(key) }
     }
 
     private fun findFirst(row: Map<String, String>, keys: List<String>): String? {
-        return keys.firstNotNullOfOrNull { key ->
-            val normalizedKey = key.lowercase()
-                .replace(" ", "")
-                .replace("_", "")
-                .replace("-", "")
-                .replace("/", "")
-                .replace(".", "")
-                .replace(":", "")
-                .replace("(", "")
-                .replace(")", "")
-            row[normalizedKey]?.takeIf { it.isNotBlank() }
+        val normalizedKeys = keys.map(::normalizeKey)
+
+        normalizedKeys.forEach { normalizedKey ->
+            row[normalizedKey]?.takeIf { it.isNotBlank() }?.let { return it }
         }
+
+        normalizedKeys.forEach { normalizedKey ->
+            row.entries.firstOrNull { (header, value) ->
+                value.isNotBlank() && (
+                    header.startsWith(normalizedKey) ||
+                        normalizedKey.startsWith(header)
+                    )
+            }?.value?.let { return it }
+        }
+
+        return null
+    }
+
+    private fun normalizeKey(value: String): String {
+        return value.lowercase()
+            .replace(" ", "")
+            .replace("_", "")
+            .replace("-", "")
+            .replace("/", "")
+            .replace(".", "")
+            .replace(":", "")
+            .replace("(", "")
+            .replace(")", "")
     }
 
     private fun inferYear(monthDay: MonthDay, baseDate: LocalDate): LocalDate {

@@ -96,16 +96,6 @@ internal fun OptionsPage(
     state: HomeUiState,
     optionSection: OptionSection,
     onOptionSectionChange: (OptionSection) -> Unit,
-    manualType: EntryType,
-    manualKind: SpendingKind,
-    amount: String,
-    description: String,
-    merchant: String,
-    category: String,
-    aliasInput: String,
-    bankInput: String,
-    accountInput: String,
-    ownerInput: String,
     cardLast4Input: String,
     installmentMerchantInput: String,
     monthlyAmountInput: String,
@@ -118,34 +108,15 @@ internal fun OptionsPage(
     onInjectExpenseNotification: () -> Unit,
     onInjectIncomeNotification: () -> Unit,
     onInjectLoanNotification: () -> Unit,
-    onTypeChange: (EntryType) -> Unit,
-    onKindChange: (SpendingKind) -> Unit,
-    onAmountChange: (String) -> Unit,
-    onDescriptionChange: (String) -> Unit,
-    onMerchantChange: (String) -> Unit,
-    onCategoryChange: (String) -> Unit,
-    onSaveManual: () -> Unit,
-    onAliasChange: (String) -> Unit,
-    onBankChange: (String) -> Unit,
-    onAccountChange: (String) -> Unit,
-    onOwnerChange: (String) -> Unit,
     onCardLast4Change: (String) -> Unit,
     onInstallmentMerchantChange: (String) -> Unit,
     onMonthlyAmountChange: (String) -> Unit,
     onInstallmentMonthsChange: (String) -> Unit,
-    onSaveAlias: () -> Unit,
-    onSaveAccount: () -> Unit,
     onSaveInstallment: () -> Unit,
-    onLoadManualFromEntry: (LedgerEntry) -> Unit,
-    onSaveTemplate: (String, String) -> Unit,
-    onRunTemplate: (String) -> Unit,
-    onDeleteTemplate: (String) -> Unit,
-    onRefreshRecurring: () -> Unit,
     onSetTotalBudget: (String) -> Unit,
-    onSetCategoryBudget: (String, String) -> Unit,
-    onRemoveCategoryBudget: (String) -> Unit,
     onCloseMonth: (String) -> Unit,
     onSaveRule: (String, SpendingKind, String) -> Unit,
+    onSaveNaturalRule: (String) -> Unit,
     onRemoveRule: (String) -> Unit,
     onCreateRuleFromEntry: (String, SpendingKind) -> Unit
 ) {
@@ -164,7 +135,7 @@ internal fun OptionsPage(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text("옵션", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("파일/입력/등록 기능은 옵션에서 관리합니다.")
+                    Text("파일/등록/분석 기능은 옵션에서 관리합니다.")
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -175,11 +146,6 @@ internal fun OptionsPage(
                             selected = optionSection == OptionSection.FILE,
                             onClick = { onOptionSectionChange(OptionSection.FILE) },
                             label = { Text("파일") }
-                        )
-                        FilterChip(
-                            selected = optionSection == OptionSection.MANUAL,
-                            onClick = { onOptionSectionChange(OptionSection.MANUAL) },
-                            label = { Text("수동 입력") }
                         )
                         FilterChip(
                             selected = optionSection == OptionSection.PROFILE,
@@ -216,54 +182,17 @@ internal fun OptionsPage(
                     )
                 }
             }
-            OptionSection.MANUAL -> {
-                item {
-                    ManualOptionSection(
-                        state = state,
-                        manualType = manualType,
-                        manualKind = manualKind,
-                        amount = amount,
-                        description = description,
-                        merchant = merchant,
-                        category = category,
-                        onTypeChange = onTypeChange,
-                        onKindChange = onKindChange,
-                        onAmountChange = onAmountChange,
-                        onDescriptionChange = onDescriptionChange,
-                        onMerchantChange = onMerchantChange,
-                        onCategoryChange = onCategoryChange,
-                        onSave = onSaveManual,
-                        onLoadManualFromEntry = onLoadManualFromEntry,
-                        onSaveTemplate = onSaveTemplate,
-                        onRunTemplate = onRunTemplate,
-                        onDeleteTemplate = onDeleteTemplate,
-                        onRefreshRecurring = onRefreshRecurring
-                    )
-                }
-            }
-
             OptionSection.PROFILE -> {
                 item {
                     ProfileOptionSection(
-                        state = state,
-                        aliasInput = aliasInput,
-                        bankInput = bankInput,
-                        accountInput = accountInput,
-                        ownerInput = ownerInput,
                         cardLast4Input = cardLast4Input,
                         installmentMerchantInput = installmentMerchantInput,
                         monthlyAmountInput = monthlyAmountInput,
                         installmentMonthsInput = installmentMonthsInput,
-                        onAliasChange = onAliasChange,
-                        onBankChange = onBankChange,
-                        onAccountChange = onAccountChange,
-                        onOwnerChange = onOwnerChange,
                         onCardLast4Change = onCardLast4Change,
                         onInstallmentMerchantChange = onInstallmentMerchantChange,
                         onMonthlyAmountChange = onMonthlyAmountChange,
                         onInstallmentMonthsChange = onInstallmentMonthsChange,
-                        onSaveAlias = onSaveAlias,
-                        onSaveAccount = onSaveAccount,
                         onSaveInstallment = onSaveInstallment
                     )
                 }
@@ -274,10 +203,9 @@ internal fun OptionsPage(
                     ControlOptionSection(
                         state = state,
                         onSetTotalBudget = onSetTotalBudget,
-                        onSetCategoryBudget = onSetCategoryBudget,
-                        onRemoveCategoryBudget = onRemoveCategoryBudget,
                         onCloseMonth = onCloseMonth,
                         onSaveRule = onSaveRule,
+                        onSaveNaturalRule = onSaveNaturalRule,
                         onRemoveRule = onRemoveRule,
                         onCreateRuleFromEntry = onCreateRuleFromEntry
                     )
@@ -346,7 +274,7 @@ private fun FileOptionSection(
 }
 
 @Composable
-private fun ManualOptionSection(
+internal fun ManualEntrySection(
     state: HomeUiState,
     manualType: EntryType,
     manualKind: SpendingKind,
@@ -359,7 +287,6 @@ private fun ManualOptionSection(
     onAmountChange: (String) -> Unit,
     onDescriptionChange: (String) -> Unit,
     onMerchantChange: (String) -> Unit,
-    onCategoryChange: (String) -> Unit,
     onSave: () -> Unit,
     onLoadManualFromEntry: (LedgerEntry) -> Unit,
     onSaveTemplate: (String, String) -> Unit,
@@ -383,7 +310,7 @@ private fun ManualOptionSection(
                         FilterChip(
                             selected = manualType == type,
                             onClick = { onTypeChange(type) },
-                            label = { Text(if (type == EntryType.EXPENSE) "지출" else "수입") }
+                            label = { Text(if (type == EntryType.EXPENSE) "소비" else "수입") }
                         )
                     }
                 }
@@ -452,10 +379,12 @@ private fun ManualOptionSection(
                     onValueChange = onMerchantChange,
                     label = "가맹점/거래처 (선택)"
                 )
-                CleanField(
-                    value = category,
-                    onValueChange = onCategoryChange,
-                    label = "카테고리 (비우면 자동)"
+                SupportingText(
+                    if (category.isBlank()) {
+                        "카테고리: 가계부 상단에서 선택해 주세요"
+                    } else {
+                        "카테고리: $category"
+                    }
                 )
 
                 Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
@@ -471,10 +400,16 @@ private fun ManualOptionSection(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text("빠른 입력 템플릿", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "자주 쓰는 거래를 저장해 두고, 버튼 한 번으로 다시 입력하는 기능입니다. " +
+                                "반복일을 넣으면 매월 자동으로 생성됩니다.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF475569)
+                        )
                         CleanField(
                             value = templateName,
                             onValueChange = { templateName = it },
-                            label = "템플릿 이름 (비우면 거래내용 사용)"
+                            label = "템플릿 이름 (비우면 거래 내용 사용)"
                         )
                         CleanField(
                             value = repeatDayText,
@@ -563,25 +498,14 @@ private fun ManualOptionSection(
 
 @Composable
 private fun ProfileOptionSection(
-    state: HomeUiState,
-    aliasInput: String,
-    bankInput: String,
-    accountInput: String,
-    ownerInput: String,
     cardLast4Input: String,
     installmentMerchantInput: String,
     monthlyAmountInput: String,
     installmentMonthsInput: String,
-    onAliasChange: (String) -> Unit,
-    onBankChange: (String) -> Unit,
-    onAccountChange: (String) -> Unit,
-    onOwnerChange: (String) -> Unit,
     onCardLast4Change: (String) -> Unit,
     onInstallmentMerchantChange: (String) -> Unit,
     onMonthlyAmountChange: (String) -> Unit,
     onInstallmentMonthsChange: (String) -> Unit,
-    onSaveAlias: () -> Unit,
-    onSaveAccount: () -> Unit,
     onSaveInstallment: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -594,7 +518,7 @@ private fun ProfileOptionSection(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text("등록 관리", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text("대출/할부는 카드 명세서 import 시 자동 인식됩니다.")
+                Text("할부/대출 건은 월 납부 스케줄만 등록해 두세요.")
             }
         }
 
@@ -603,37 +527,10 @@ private fun ProfileOptionSection(
                 modifier = Modifier.padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("본인 별칭 등록", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                CleanField(value = aliasInput, onValueChange = onAliasChange, label = "별칭 (예: 내이름)")
-                Button(onClick = onSaveAlias) { Text("별칭 저장") }
-                if (state.ownerAliases.isNotEmpty()) {
-                    Text("등록된 별칭: ${state.ownerAliases.joinToString(", ")}")
-                }
-            }
-        }
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("내 계좌 등록", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                CleanField(value = bankInput, onValueChange = onBankChange, label = "은행")
-                CleanField(value = accountInput, onValueChange = onAccountChange, label = "계좌 마스킹/끝자리")
-                CleanField(value = ownerInput, onValueChange = onOwnerChange, label = "예금주명")
-                Button(onClick = onSaveAccount) { Text("계좌 저장") }
-            }
-        }
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("할부 수동 등록 (옵션)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text("자동 인식이 누락될 때만 사용하세요.")
-                CleanField(value = cardLast4Input, onValueChange = onCardLast4Change, label = "카드 끝 4자리")
-                CleanField(value = installmentMerchantInput, onValueChange = onInstallmentMerchantChange, label = "가맹점")
+                Text("할부/대출 등록", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("자동 인식 누락 대비용. (월 납부액/개월 수/카드/사용처)")
+                CleanField(value = cardLast4Input, onValueChange = onCardLast4Change, label = "어디 카드")
+                CleanField(value = installmentMerchantInput, onValueChange = onInstallmentMerchantChange, label = "사용처")
                 CleanField(
                     value = monthlyAmountInput,
                     onValueChange = onMonthlyAmountChange,
@@ -646,7 +543,7 @@ private fun ProfileOptionSection(
                     label = "총 개월 수",
                     keyboardType = KeyboardType.Number
                 )
-                Button(onClick = onSaveInstallment) { Text("할부 저장") }
+                Button(onClick = onSaveInstallment) { Text("등록 저장") }
             }
         }
     }
@@ -656,19 +553,17 @@ private fun ProfileOptionSection(
 private fun ControlOptionSection(
     state: HomeUiState,
     onSetTotalBudget: (String) -> Unit,
-    onSetCategoryBudget: (String, String) -> Unit,
-    onRemoveCategoryBudget: (String) -> Unit,
     onCloseMonth: (String) -> Unit,
     onSaveRule: (String, SpendingKind, String) -> Unit,
+    onSaveNaturalRule: (String) -> Unit,
     onRemoveRule: (String) -> Unit,
     onCreateRuleFromEntry: (String, SpendingKind) -> Unit
 ) {
     var totalBudgetInput by rememberSaveable { mutableStateOf("") }
-    var budgetCategoryInput by rememberSaveable { mutableStateOf("") }
-    var categoryBudgetInput by rememberSaveable { mutableStateOf("") }
     var closingActualInput by rememberSaveable { mutableStateOf("") }
     var ruleKeywordInput by rememberSaveable { mutableStateOf("") }
     var ruleCategoryInput by rememberSaveable { mutableStateOf("") }
+    var naturalRuleInput by rememberSaveable { mutableStateOf("") }
     var ruleKindName by rememberSaveable { mutableStateOf(SpendingKind.SUBSCRIPTION.name) }
     val ruleKind = runCatching { SpendingKind.valueOf(ruleKindName) }.getOrDefault(SpendingKind.SUBSCRIPTION)
 
@@ -694,34 +589,6 @@ private fun ControlOptionSection(
                 )
                 Button(onClick = { onSetTotalBudget(totalBudgetInput) }) {
                     Text("총 예산 저장")
-                }
-
-                CleanField(
-                    value = budgetCategoryInput,
-                    onValueChange = { budgetCategoryInput = it },
-                    label = "카테고리"
-                )
-                CleanField(
-                    value = categoryBudgetInput,
-                    onValueChange = { categoryBudgetInput = it.filter(Char::isDigit) },
-                    label = "카테고리 예산",
-                    keyboardType = KeyboardType.Number
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { onSetCategoryBudget(budgetCategoryInput, categoryBudgetInput) }) {
-                        Text("카테고리 예산 저장")
-                    }
-                    Button(onClick = { onRemoveCategoryBudget(budgetCategoryInput) }) {
-                        Text("삭제")
-                    }
-                }
-
-                state.budgetProgress.categoryProgress.take(10).forEach { progress ->
-                    val color = if (progress.remaining < 0L) Color(0xFFB42318) else Color(0xFF1C7A4F)
-                    Text(
-                        "${progress.category}: ${progress.used}/${progress.budget} (잔여 ${progress.remaining})",
-                        color = color
-                    )
                 }
 
                 if (state.budgetProgress.overBudgetMessages.isNotEmpty()) {
@@ -802,6 +669,38 @@ private fun ControlOptionSection(
                     Text("룰 저장")
                 }
 
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF2F7FF))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("문장 조건 추가", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "예: 토스 내 계좌 이체 건은 소비로 분류",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF64748B)
+                        )
+                        CleanField(
+                            value = naturalRuleInput,
+                            onValueChange = { naturalRuleInput = it },
+                            label = "조건 문장"
+                        )
+                        Button(
+                            onClick = {
+                                onSaveNaturalRule(naturalRuleInput)
+                                if (naturalRuleInput.isNotBlank()) {
+                                    naturalRuleInput = ""
+                                }
+                            }
+                        ) {
+                            Text("문장으로 룰 저장")
+                        }
+                    }
+                }
+
                 if (state.classificationRules.isNotEmpty()) {
                     Text("저장된 룰", fontWeight = FontWeight.SemiBold)
                     state.classificationRules.take(12).forEach { rule ->
@@ -817,7 +716,11 @@ private fun ControlOptionSection(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column {
-                                    Text("${rule.keyword} -> ${rule.spendingKind.name}", fontWeight = FontWeight.SemiBold)
+                                    val targetLabel = rule.forcedType?.let(::entryTypeLabel) ?: "기존 타입 유지"
+                                    Text(
+                                        "${rule.keyword} -> ${spendingKindLabel(rule.spendingKind)} / $targetLabel",
+                                        fontWeight = FontWeight.SemiBold
+                                    )
                                     Text("카테고리: ${rule.category}", style = MaterialTheme.typography.bodySmall)
                                 }
                                 TextButton(onClick = { onRemoveRule(rule.id) }) {
@@ -860,6 +763,23 @@ private fun ControlOptionSection(
     }
 }
 
+private fun spendingKindLabel(kind: SpendingKind): String {
+    return when (kind) {
+        SpendingKind.NORMAL -> "일반"
+        SpendingKind.SUBSCRIPTION -> "구독"
+        SpendingKind.INSTALLMENT -> "할부"
+        SpendingKind.LOAN -> "대출"
+    }
+}
+
+private fun entryTypeLabel(type: EntryType): String {
+    return when (type) {
+        EntryType.EXPENSE -> "소비"
+        EntryType.INCOME -> "수입"
+        EntryType.TRANSFER -> "이체"
+    }
+}
+
 
 @Composable
 private fun NotificationStatusCard(
@@ -876,6 +796,15 @@ private fun NotificationStatusCard(
                 else -> "미연결: 아래 버튼으로 알림 접근에서 MoneyMind를 허용해 주세요."
             }
             Text(statusText)
+            Text(
+                if (state.smsPermissionGranted) {
+                    "SMS 권한: 허용됨"
+                } else {
+                    "SMS 권한: 미허용 (앱 시작 시 요청 팝업)"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF475569)
+            )
             if (state.notificationCaptureSupported) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = onOpenSettings) { Text("알림 접근 권한 열기") }
@@ -885,4 +814,3 @@ private fun NotificationStatusCard(
         }
     }
 }
-

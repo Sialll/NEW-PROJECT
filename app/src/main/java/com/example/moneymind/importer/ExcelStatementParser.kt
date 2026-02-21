@@ -57,8 +57,9 @@ class ExcelStatementParser : StatementParser {
                     val row = sheet.getRow(rowIndex) ?: continue
                     val values = extractRowValues(row, formatter, minColumns = headers.size)
                     if (values.none { it.isNotBlank() }) continue
+                    val alignedValues = alignValuesToHeaders(headers, values)
                     val rowMap = headers.indices.associate { colIndex ->
-                        headers[colIndex] to values.getOrElse(colIndex) { "" }.trim()
+                        headers[colIndex] to alignedValues.getOrElse(colIndex) { "" }.trim()
                     }
                     RowMapper.mapRow(rowMap, source)?.let(results::add)
                 }
@@ -121,8 +122,9 @@ class ExcelStatementParser : StatementParser {
         val records = mutableListOf<ParsedRecord>()
         tableRows.drop(headerRowIndex + 1).forEach { values ->
             if (values.none { it.isNotBlank() }) return@forEach
+            val alignedValues = alignValuesToHeaders(headers, values)
             val rowMap = headers.indices.associate { index ->
-                headers[index] to values.getOrElse(index) { "" }.trim()
+                headers[index] to alignedValues.getOrElse(index) { "" }.trim()
             }
             RowMapper.mapRow(rowMap, source)?.let(records::add)
         }
@@ -313,18 +315,107 @@ class ExcelStatementParser : StatementParser {
             .replace("]", "")
     }
 
+    private fun alignValuesToHeaders(headers: List<String>, values: List<String>): List<String> {
+        if (headers.isEmpty()) return emptyList()
+        if (values.size >= headers.size) return values.take(headers.size)
+
+        val aligned = MutableList(headers.size) { "" }
+        var headerIndex = 0
+        var valueIndex = 0
+
+        while (headerIndex < headers.size && valueIndex < values.size) {
+            val remainingHeaders = headers.size - headerIndex
+            val remainingValues = values.size - valueIndex
+            val normalizedHeader = normalizeHeaderToken(headers[headerIndex])
+            val shouldInsertBlank =
+                remainingValues < remainingHeaders &&
+                    optionalMissingColumnTokens.contains(normalizedHeader)
+
+            if (shouldInsertBlank) {
+                headerIndex++
+                continue
+            }
+
+            aligned[headerIndex] = values[valueIndex]
+            headerIndex++
+            valueIndex++
+        }
+
+        return aligned
+    }
+
     companion object {
         private val dateHeaderTokens = setOf(
-            "date", "datetime", "거래일", "거래일자", "거래일시",
-            "사용일", "이용일", "승인일", "승인일시", "결제일", "매입일", "일자", "날짜"
+            "date",
+            "datetime",
+            "거래일",
+            "거래일자",
+            "거래일시",
+            "거래시간",
+            "사용일",
+            "이용일",
+            "승인일",
+            "승인일시",
+            "결제일",
+            "매입일",
+            "일자",
+            "날짜"
         )
         private val descriptionHeaderTokens = setOf(
-            "description", "memo", "merchant", "detail", "적요",
-            "내용", "가맹점", "이용가맹점", "거래내용", "거래처", "상호", "상대명"
+            "description",
+            "memo",
+            "merchant",
+            "detail",
+            "적요",
+            "내용",
+            "가맹점",
+            "이용가맹점",
+            "거래내용",
+            "거래처",
+            "상호",
+            "상호명",
+            "상대명",
+            "사용처"
         )
         private val amountHeaderTokens = setOf(
-            "amount", "total", "금액", "결제금액", "결제원금", "청구금액",
-            "승인금액", "거래금액", "이용금액", "사용금액", "출금", "입금"
+            "amount",
+            "total",
+            "금액",
+            "결제금액",
+            "결제원금",
+            "청구금액",
+            "승인금액",
+            "거래금액",
+            "이용금액",
+            "사용금액",
+            "출금",
+            "입금"
         )
+        private val optionalMissingColumnTokens = setOf(
+            "amount",
+            "total",
+            "금액",
+            "거래금액",
+            "결제금액",
+            "승인금액",
+            "이용금액",
+            "사용금액",
+            "출금",
+            "입금"
+        ).map(::normalizeToken).toSet()
+
+        private fun normalizeToken(token: String): String {
+            return token.lowercase()
+                .replace(" ", "")
+                .replace("_", "")
+                .replace("-", "")
+                .replace("/", "")
+                .replace(".", "")
+                .replace(":", "")
+                .replace("(", "")
+                .replace(")", "")
+                .replace("[", "")
+                .replace("]", "")
+        }
     }
 }

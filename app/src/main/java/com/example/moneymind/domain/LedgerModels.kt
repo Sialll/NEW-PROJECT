@@ -138,6 +138,7 @@ data class ClassificationRule(
     val keyword: String,
     val spendingKind: SpendingKind,
     val category: String,
+    val forcedType: EntryType? = null,
     val enabled: Boolean = true,
     val createdAtMillis: Long = System.currentTimeMillis()
 )

@@ -1,8 +1,12 @@
 ﻿package com.example.moneymind.ui
 
+import android.Manifest
 import android.app.Application
 import android.content.Context
+import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.net.Uri
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.moneymind.BuildConfig
@@ -91,6 +95,8 @@ data class HomeUiState(
     val budgetTargets: List<BudgetTarget> = emptyList(),
     val monthlyClosings: List<MonthlyClosing> = emptyList(),
     val classificationRules: List<ClassificationRule> = emptyList(),
+    val categoryOptions: List<String> = defaultCategoryOptions,
+    val pinnedCategories: Set<String> = emptySet(),
     val reviewCandidates: List<LedgerEntry> = emptyList(),
     val summary: MonthlySummary = MonthlySummary(
         month = YearMonth.now(),
@@ -108,18 +114,28 @@ data class HomeUiState(
     val encryptionEnabled: Boolean = true,
     val notificationCaptureSupported: Boolean = BuildConfig.NOTIFICATION_CAPTURE_ENABLED,
     val notificationAccessEnabled: Boolean = false,
+    val smsPermissionGranted: Boolean = false,
     val lastError: String? = null
-)
+) {
+    companion object {
+        val defaultCategoryOptions = emptyList<String>()
+    }
+}
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: LedgerRepository = ServiceLocator.repository(application)
     private val importer = StatementImporter()
     private val csvExporter = CsvLedgerExporter()
+    private val prefs: SharedPreferences =
+        application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val customCategories = MutableStateFlow(loadCustomCategories())
+    private val pinnedCategories = MutableStateFlow(loadPinnedCategories())
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     init {
         refreshNotificationAccess()
+        refreshSmsPermissionAccess()
         bootstrapRecurringEntries()
         observePersistedState()
     }
@@ -202,15 +218,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
                 val normalizedType = type
                 val resolvedKind = if (normalizedType == EntryType.EXPENSE) spendingKind else SpendingKind.NORMAL
-                val resolvedCategory = category.trim().ifBlank {
-                    when {
-                        normalizedType == EntryType.INCOME -> "수입"
-                        resolvedKind == SpendingKind.SUBSCRIPTION -> "구독"
-                        resolvedKind == SpendingKind.INSTALLMENT -> "할부"
-                        resolvedKind == SpendingKind.LOAN -> "대출"
-                        normalizedType == EntryType.TRANSFER -> "이체"
-                        else -> "일반지출"
-                    }
+                val resolvedCategory = category.trim()
+                if (resolvedCategory.isBlank()) {
+                    error("카테고리를 먼저 선택하거나 추가해 주세요.")
                 }
 
                 repository.addManualEntry(
@@ -233,6 +243,37 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun addCustomCategory(category: String) {
+        val normalized = category.trim()
+        if (normalized.isBlank()) return
+
+        val updated = customCategories.value + normalized
+        customCategories.value = updated
+        prefs.edit().putStringSet(PREF_CUSTOM_CATEGORIES, updated).apply()
+
+        _uiState.update { state ->
+            val merged = (state.categoryOptions + normalized)
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .sorted()
+            state.copy(categoryOptions = merged)
+        }
+    }
+
+    fun togglePinnedCategory(category: String) {
+        val normalized = category.trim()
+        if (normalized.isBlank()) return
+
+        val updated = if (normalized in pinnedCategories.value) {
+            pinnedCategories.value - normalized
+        } else {
+            pinnedCategories.value + normalized
+        }
+        pinnedCategories.value = updated
+        prefs.edit().putStringSet(PREF_PINNED_CATEGORIES, updated).apply()
+    }
+
     fun saveQuickTemplate(
         name: String,
         type: EntryType,
@@ -249,6 +290,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     ?: error("금액을 숫자로 입력해 주세요.")
                 val templateName = name.trim().ifBlank { description.trim().take(18) }
                 val repeatDay = repeatMonthlyDayText.filter(Char::isDigit).toIntOrNull()?.coerceIn(1, 31)
+                val resolvedCategory = category.trim()
+                if (resolvedCategory.isBlank()) {
+                    error("템플릿 저장 전에 카테고리를 선택해 주세요.")
+                }
 
                 repository.addQuickTemplate(
                     QuickTemplate(
@@ -257,7 +302,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         amount = amount,
                         description = description.trim(),
                         merchant = merchant.trim().ifBlank { null },
-                        category = category.trim(),
+                        category = resolvedCategory,
                         spendingKind = if (type == EntryType.EXPENSE) spendingKind else SpendingKind.NORMAL,
                         repeatMonthlyDay = repeatDay,
                         enabled = true
@@ -364,9 +409,36 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 repository.upsertClassificationRule(keyword, spendingKind, category)
             }.onSuccess {
+                if (category.isNotBlank()) {
+                    addCustomCategory(category)
+                }
                 _uiState.update { it.copy(lastError = null) }
             }.onFailure { error ->
                 _uiState.update { it.copy(lastError = error.message ?: "분류 룰 저장 실패") }
+            }
+        }
+    }
+
+    fun saveNaturalLanguageRule(command: String) {
+        viewModelScope.launch {
+            runCatching {
+                val parsed = parseNaturalLanguageRule(command)
+                    ?: error("조건 문장을 이해하지 못했습니다. 예: 토스 내 계좌 이체 건은 소비로 분류")
+
+                repository.upsertClassificationRule(
+                    keyword = parsed.keyword,
+                    spendingKind = parsed.spendingKind,
+                    category = parsed.category,
+                    forcedType = parsed.forcedType
+                )
+                parsed
+            }.onSuccess { parsed ->
+                if (parsed.category.isNotBlank()) {
+                    addCustomCategory(parsed.category)
+                }
+                _uiState.update { it.copy(lastError = null) }
+            }.onFailure { error ->
+                _uiState.update { it.copy(lastError = error.message ?: "조건 저장 실패") }
             }
         }
     }
@@ -514,6 +586,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun refreshSmsPermissionAccess() {
+        val context = getApplication<Application>().applicationContext
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+
+        _uiState.update { it.copy(smsPermissionGranted = granted) }
+    }
+
     private fun bootstrapRecurringEntries() {
         viewModelScope.launch {
             runCatching {
@@ -527,43 +609,49 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             combine(
                 combine(
-                    repository.entriesFlow,
-                    repository.ownedAccountsFlow,
-                    repository.ownerAliasesFlow,
-                    repository.installmentPlansFlow
-                ) { entries, accounts, aliases, plans ->
-                    CorePersistedState(
-                        entries = entries,
-                        accounts = accounts,
-                        aliases = aliases,
-                        plans = plans
+                    combine(
+                        repository.entriesFlow,
+                        repository.ownedAccountsFlow,
+                        repository.ownerAliasesFlow,
+                        repository.installmentPlansFlow
+                    ) { entries, accounts, aliases, plans ->
+                        CorePersistedState(
+                            entries = entries,
+                            accounts = accounts,
+                            aliases = aliases,
+                            plans = plans
+                        )
+                    },
+                    combine(
+                        repository.quickTemplatesFlow,
+                        repository.budgetTargetsFlow,
+                        repository.monthlyClosingsFlow,
+                        repository.classificationRulesFlow
+                    ) { templates, budgets, closings, rules ->
+                        ExtendedPersistedState(
+                            templates = templates,
+                            budgets = budgets,
+                            closings = closings,
+                            rules = rules
+                        )
+                    }
+                ) { core, extended ->
+                    PersistedState(
+                        entries = core.entries,
+                        accounts = core.accounts,
+                        aliases = core.aliases,
+                        plans = core.plans,
+                        templates = extended.templates,
+                        budgets = extended.budgets,
+                        closings = extended.closings,
+                        rules = extended.rules
                     )
                 },
-                combine(
-                    repository.quickTemplatesFlow,
-                    repository.budgetTargetsFlow,
-                    repository.monthlyClosingsFlow,
-                    repository.classificationRulesFlow
-                ) { templates, budgets, closings, rules ->
-                    ExtendedPersistedState(
-                        templates = templates,
-                        budgets = budgets,
-                        closings = closings,
-                        rules = rules
-                    )
-                }
-            ) { core, extended ->
-                PersistedState(
-                    entries = core.entries,
-                    accounts = core.accounts,
-                    aliases = core.aliases,
-                    plans = core.plans,
-                    templates = extended.templates,
-                    budgets = extended.budgets,
-                    closings = extended.closings,
-                    rules = extended.rules
-                )
-            }.collect { persisted ->
+                customCategories,
+                pinnedCategories
+            ) { persisted, customCategorySet, pinnedCategorySet ->
+                Triple(persisted, customCategorySet, pinnedCategorySet)
+            }.collect { (persisted, customCategorySet, pinnedCategorySet) ->
                 val month = YearMonth.now()
                 val summary = SummaryCalculator.summarize(persisted.entries, month)
                 val warnings = buildWarnings(persisted.plans, month)
@@ -571,6 +659,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val closingPreview = buildClosingPreview(persisted.entries, persisted.closings, month)
                 val report = buildAdvancedReport(persisted.entries, persisted.closings, month)
                 val reviewCandidates = buildReviewCandidates(persisted.entries, persisted.rules, month)
+                val categoryOptions = buildCategoryOptions(
+                    entries = persisted.entries,
+                    templates = persisted.templates,
+                    rules = persisted.rules,
+                    customCategories = customCategorySet
+                )
 
                 _uiState.update { state ->
                     state.copy(
@@ -581,6 +675,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         budgetTargets = persisted.budgets,
                         monthlyClosings = persisted.closings,
                         classificationRules = persisted.rules,
+                        categoryOptions = categoryOptions,
+                        pinnedCategories = pinnedCategorySet,
                         reviewCandidates = reviewCandidates,
                         summary = summary,
                         budgetProgress = budgetProgress,
@@ -591,6 +687,113 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    private fun parseNaturalLanguageRule(command: String): ParsedNaturalRule? {
+        val normalized = command.trim()
+        if (normalized.isBlank()) return null
+
+        val forcedType = detectForcedType(normalized)
+        val keywordBase = extractKeywordFromRuleText(normalized)
+        if (keywordBase.length < 2) return null
+
+        val spendingKind = when {
+            containsAny(normalized, listOf("구독", "정기결제", "멤버십", "자동결제")) -> SpendingKind.SUBSCRIPTION
+            containsAny(normalized, listOf("할부", "분할", "무이자", "개월")) -> SpendingKind.INSTALLMENT
+            containsAny(normalized, listOf("대출", "이자", "원리금", "카드론", "현금서비스")) -> SpendingKind.LOAN
+            else -> SpendingKind.NORMAL
+        }
+
+        val category = extractCategoryFromCommand(normalized).ifBlank {
+            when (forcedType) {
+                EntryType.INCOME -> "수입"
+                EntryType.TRANSFER -> "이체"
+                else -> when (spendingKind) {
+                    SpendingKind.SUBSCRIPTION -> "구독"
+                    SpendingKind.INSTALLMENT -> "할부"
+                    SpendingKind.LOAN -> "대출"
+                    SpendingKind.NORMAL -> "일반지출"
+                }
+            }
+        }
+
+        return ParsedNaturalRule(
+            keyword = keywordBase.lowercase(),
+            spendingKind = spendingKind,
+            category = category,
+            forcedType = forcedType
+        )
+    }
+
+    private fun detectForcedType(command: String): EntryType? {
+        return when {
+            containsAny(command, listOf("소비", "지출", "결제", "사용")) -> EntryType.EXPENSE
+            containsAny(command, listOf("수입", "입금", "정산", "벌")) -> EntryType.INCOME
+            containsAny(command, listOf("이체", "송금", "옮김")) -> EntryType.TRANSFER
+            else -> null
+        }
+    }
+
+    private fun extractKeywordFromRuleText(command: String): String {
+        val patterns = listOf(
+            Regex("(.+?)\\s*(은|는|이면|면|인\\s*경우|일\\s*때|일때|포함되면|있으면)"),
+            Regex("(.+?)\\s*(을|를)\\s*.*(분류|처리|설정)"),
+            Regex("(.+?)\\s*(무조건|항상)")
+        )
+        val fromPattern = patterns.firstNotNullOfOrNull { regex ->
+            regex.find(command)?.groupValues?.getOrNull(1)?.trim()
+        }
+
+        return (fromPattern ?: command)
+            .replace("건", " ")
+            .replace("거래", " ")
+            .replace("문자", " ")
+            .replace("알림", " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun containsAny(text: String, tokens: List<String>): Boolean {
+        return tokens.any { token -> text.contains(token, ignoreCase = true) }
+    }
+
+    private fun extractCategoryFromCommand(command: String): String {
+        val regex = Regex("(카테고리|분류)\\s*(은|는|:)?\\s*([\\p{L}\\p{N}/_-]{2,20})")
+        return regex.find(command)?.groupValues?.getOrNull(3)?.trim().orEmpty()
+    }
+
+    private fun buildCategoryOptions(
+        entries: List<LedgerEntry>,
+        templates: List<QuickTemplate>,
+        rules: List<ClassificationRule>,
+        customCategories: Set<String>
+    ): List<String> {
+        val dynamic = entries.map { it.category } +
+            templates.map { it.category } +
+            rules.map { it.category } +
+            customCategories
+
+        return (HomeUiState.defaultCategoryOptions + dynamic)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
+
+    private fun loadCustomCategories(): Set<String> {
+        return prefs.getStringSet(PREF_CUSTOM_CATEGORIES, emptySet())
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            ?: emptySet()
+    }
+
+    private fun loadPinnedCategories(): Set<String> {
+        return prefs.getStringSet(PREF_PINNED_CATEGORIES, emptySet())
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            ?: emptySet()
     }
 
     private fun buildWarnings(plans: List<InstallmentPlan>, month: YearMonth): List<String> {
@@ -617,32 +820,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val totalBudget = targets.firstOrNull { it.key == LedgerRepository.TOTAL_BUDGET_KEY }?.amount
         val totalRemaining = totalBudget?.minus(totalExpense)
 
-        val categoryUsage = expenses.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amount } }
-        val categoryTargets = targets.filter { !it.category.isNullOrBlank() }
-        val categoryProgress = categoryTargets.map { target ->
-            val category = target.category.orEmpty()
-            val used = categoryUsage[category] ?: 0L
-            CategoryBudgetProgress(
-                category = category,
-                budget = target.amount,
-                used = used,
-                remaining = target.amount - used
-            )
-        }.sortedBy { it.remaining }
-
         val overMessages = mutableListOf<String>()
         if (totalRemaining != null && totalRemaining < 0L) {
             overMessages += "총예산 초과 ${abs(totalRemaining)}원"
         }
-        categoryProgress
-            .filter { it.remaining < 0L }
-            .forEach { overMessages += "${it.category} 예산 초과 ${abs(it.remaining)}원" }
 
         return BudgetProgress(
             totalBudget = totalBudget,
             totalExpense = totalExpense,
             totalRemaining = totalRemaining,
-            categoryProgress = categoryProgress,
+            categoryProgress = emptyList(),
             overBudgetMessages = overMessages
         )
     }
@@ -832,4 +1019,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val closings: List<MonthlyClosing>,
         val rules: List<ClassificationRule>
     )
+
+    private data class ParsedNaturalRule(
+        val keyword: String,
+        val spendingKind: SpendingKind,
+        val category: String,
+        val forcedType: EntryType?
+    )
+
+    companion object {
+        private const val PREFS_NAME = "moneymind_preferences"
+        private const val PREF_CUSTOM_CATEGORIES = "custom_categories"
+        private const val PREF_PINNED_CATEGORIES = "pinned_categories"
+    }
 }

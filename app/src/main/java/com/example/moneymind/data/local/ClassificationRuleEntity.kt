@@ -9,6 +9,7 @@ data class ClassificationRuleEntity(
     val keyword: String,
     val spendingKind: String,
     val category: String,
+    val forcedType: String?,
     val enabled: Boolean,
     val createdAtMillis: Long
 )

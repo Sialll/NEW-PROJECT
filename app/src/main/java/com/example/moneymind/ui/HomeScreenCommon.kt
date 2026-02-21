@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -35,8 +36,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -186,6 +189,119 @@ internal fun CleanField(
             unfocusedBorderColor = Color(0xFFB8C0CC)
         )
     )
+}
+
+@Composable
+internal fun CategorySelectField(
+    value: String,
+    options: List<String>,
+    onValueChange: (String) -> Unit,
+    onAddCategory: (String) -> Unit,
+    label: String = "카테고리"
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var addMode by rememberSaveable { mutableStateOf(false) }
+    var newCategory by rememberSaveable { mutableStateOf("") }
+
+    val normalizedOptions = remember(options) {
+        options.asSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+            .toList()
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true }
+        ) {
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                readOnly = true,
+                value = value,
+                onValueChange = {},
+                label = { Text(label) },
+                placeholder = { Text("카테고리 선택") },
+                trailingIcon = { Text(if (expanded) "▲" else "▼") },
+                shape = RoundedCornerShape(14.dp),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color(0xFF6C7EA0),
+                    unfocusedBorderColor = Color(0xFFB8C0CC)
+                )
+            )
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("자동 분류") },
+                    onClick = {
+                        onValueChange("")
+                        expanded = false
+                        addMode = false
+                    }
+                )
+
+                if (normalizedOptions.isNotEmpty()) {
+                    HorizontalDivider()
+                }
+
+                normalizedOptions.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option) },
+                        onClick = {
+                            onValueChange(option)
+                            expanded = false
+                            addMode = false
+                        }
+                    )
+                }
+
+                HorizontalDivider()
+
+                DropdownMenuItem(
+                    text = { Text("+ 카테고리 추가") },
+                    onClick = {
+                        addMode = true
+                        expanded = false
+                    }
+                )
+            }
+        }
+
+        if (addMode) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    modifier = Modifier.weight(1f),
+                    value = newCategory,
+                    onValueChange = { newCategory = it.take(30) },
+                    label = { Text("새 카테고리") },
+                    singleLine = true
+                )
+                TextButton(
+                    onClick = {
+                        val normalized = newCategory.trim()
+                        if (normalized.isBlank()) return@TextButton
+                        onAddCategory(normalized)
+                        onValueChange(normalized)
+                        newCategory = ""
+                        addMode = false
+                    }
+                ) {
+                    Text("추가")
+                }
+            }
+        }
+    }
 }
 
 internal fun openNotificationListenerSettings(context: Context) {

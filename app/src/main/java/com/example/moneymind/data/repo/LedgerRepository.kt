@@ -188,7 +188,12 @@ class LedgerRepository(
         database.budgetTargetDao().deleteByKey(categoryBudgetKey(normalizedCategory))
     }
 
-    suspend fun upsertClassificationRule(keyword: String, spendingKind: SpendingKind, category: String) {
+    suspend fun upsertClassificationRule(
+        keyword: String,
+        spendingKind: SpendingKind,
+        category: String,
+        forcedType: EntryType? = null
+    ) {
         val normalizedKeyword = keyword.trim().lowercase()
         if (normalizedKeyword.isBlank()) return
 
@@ -202,6 +207,7 @@ class LedgerRepository(
                 keyword = normalizedKeyword,
                 spendingKind = spendingKind.name,
                 category = normalizedCategory,
+                forcedType = forcedType?.name,
                 enabled = true,
                 createdAtMillis = System.currentTimeMillis()
             )
@@ -221,9 +227,13 @@ class LedgerRepository(
 
         val entries = database.ledgerDao().getAll().map { it.toDomain() }
         entries.forEach { entry ->
-            if (entry.type != EntryType.EXPENSE) return@forEach
             val updated = classifier.applyRuleIfMatched(entry, rules)
-            if (updated.spendingKind == entry.spendingKind && updated.category == entry.category) {
+            if (
+                updated.type == entry.type &&
+                updated.spendingKind == entry.spendingKind &&
+                updated.category == entry.category &&
+                updated.countedInExpense == entry.countedInExpense
+            ) {
                 return@forEach
             }
             database.ledgerDao().updateEntryById(
@@ -528,6 +538,7 @@ class LedgerRepository(
             keyword = keyword,
             spendingKind = runCatching { SpendingKind.valueOf(spendingKind) }.getOrDefault(SpendingKind.NORMAL),
             category = category,
+            forcedType = forcedType?.let { runCatching { EntryType.valueOf(it) }.getOrNull() },
             enabled = enabled,
             createdAtMillis = createdAtMillis
         )

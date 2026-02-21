@@ -8,7 +8,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -70,6 +69,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -97,11 +97,33 @@ internal fun LedgerBackPage(
     viewMode: LedgerViewMode,
     selectedDayOfMonth: Int,
     checkedEntryIds: Set<String>,
+    manualType: EntryType,
+    manualKind: SpendingKind,
+    manualAmount: String,
+    manualDescription: String,
+    manualMerchant: String,
+    manualCategory: String,
+    categoryOptions: List<String>,
+    pinnedCategories: Set<String>,
     onViewModeChange: (LedgerViewMode) -> Unit,
     onSelectDay: (Int) -> Unit,
     onToggleChecked: (String) -> Unit,
     onEditEntry: (LedgerEntry) -> Unit,
-    onDeleteEntry: (LedgerEntry) -> Unit
+    onDeleteEntry: (LedgerEntry) -> Unit,
+    onManualTypeChange: (EntryType) -> Unit,
+    onManualKindChange: (SpendingKind) -> Unit,
+    onManualAmountChange: (String) -> Unit,
+    onManualDescriptionChange: (String) -> Unit,
+    onManualMerchantChange: (String) -> Unit,
+    onManualCategoryChange: (String) -> Unit,
+    onAddCategoryOption: (String) -> Unit,
+    onToggleCategoryPin: (String) -> Unit,
+    onSaveManual: () -> Unit,
+    onLoadManualFromEntry: (LedgerEntry) -> Unit,
+    onSaveTemplate: (String, String) -> Unit,
+    onRunTemplate: (String) -> Unit,
+    onDeleteTemplate: (String) -> Unit,
+    onRefreshRecurring: () -> Unit
 ) {
     var monthOffset by rememberSaveable { mutableStateOf(0) }
     var keywordFilter by rememberSaveable { mutableStateOf("") }
@@ -112,6 +134,8 @@ internal fun LedgerBackPage(
     var toDayText by rememberSaveable { mutableStateOf("") }
     var showAdvancedFilters by rememberSaveable { mutableStateOf(false) }
     var highlightedEntryId by rememberSaveable { mutableStateOf<String?>(null) }
+    var addCategoryText by rememberSaveable { mutableStateOf("") }
+    var showAllCategories by rememberSaveable { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val listScope = rememberCoroutineScope()
@@ -212,6 +236,125 @@ internal fun LedgerBackPage(
                 ) {
                     ScreenTitle("일반 가계부")
                     SupportingText("달력식과 체크리스트 방식 중 원하는 보기로 확인하세요.")
+                    SupportingText(
+                        if (manualCategory.isBlank()) {
+                            "현재 입력 카테고리: 미선택"
+                        } else {
+                            "현재 입력 카테고리: $manualCategory"
+                        }
+                    )
+                    val allCategoryOptions = remember(state.entries, categoryOptions, manualCategory, pinnedCategories) {
+                        (state.entries.map { it.category } + categoryOptions + listOf(manualCategory))
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .sortedBy { it }
+                    }
+                    val recentCategoryOptions = remember(state.entries, categoryOptions, manualCategory, pinnedCategories) {
+                        val recentFromEntries = state.entries
+                            .sortedByDescending { it.occurredAt }
+                            .asSequence()
+                            .map { it.category.trim() }
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .toList()
+
+                        (recentFromEntries + categoryOptions + listOf(manualCategory))
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .take(5)
+                    }
+                    val pinnedOptionList = remember(allCategoryOptions, pinnedCategories) {
+                        allCategoryOptions.filter { it in pinnedCategories }
+                    }
+                    val displayedCategoryOptions = remember(
+                        showAllCategories,
+                        allCategoryOptions,
+                        recentCategoryOptions,
+                        pinnedOptionList
+                    ) {
+                        if (showAllCategories) {
+                            pinnedOptionList + allCategoryOptions.filterNot { it in pinnedCategories }
+                        } else {
+                            if (pinnedOptionList.size >= 5) {
+                                pinnedOptionList
+                            } else {
+                                pinnedOptionList + recentCategoryOptions
+                                    .filterNot { it in pinnedCategories }
+                                    .take(5 - pinnedOptionList.size)
+                            }
+                        }.distinct()
+                    }
+                    if (displayedCategoryOptions.isEmpty()) {
+                        SupportingText("카테고리 없음: 아래에서 직접 추가해 주세요.")
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                SupportingText(
+                                    if (showAllCategories) "카테고리 전체" else "최근 카테고리 5개 (고정 우선)"
+                                )
+                                if (allCategoryOptions.size > 5) {
+                                    TextButton(onClick = { showAllCategories = !showAllCategories }) {
+                                    Text(if (showAllCategories) "접기" else "전체 보기")
+                                }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            displayedCategoryOptions.forEach { category ->
+                                FilterChip(
+                                    selected = manualCategory == category,
+                                    onClick = { onManualCategoryChange(category) },
+                                    label = { Text(if (category in pinnedCategories) "★ $category" else category) }
+                                )
+                            }
+                        }
+                        if (manualCategory.isNotBlank()) {
+                            TextButton(
+                                onClick = { onToggleCategoryPin(manualCategory) }
+                            ) {
+                                Text(
+                                    if (manualCategory in pinnedCategories) {
+                                        "현재 카테고리 고정 해제"
+                                    } else {
+                                        "현재 카테고리 고정"
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            modifier = Modifier.weight(1f),
+                            value = addCategoryText,
+                            onValueChange = { addCategoryText = it.take(20) },
+                            label = { Text("카테고리 직접 추가") },
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                val normalized = addCategoryText.trim()
+                                if (normalized.isBlank()) return@Button
+                                onAddCategoryOption(normalized)
+                                onManualCategoryChange(normalized)
+                                addCategoryText = ""
+                            }
+                        ) {
+                            Text("추가")
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -252,7 +395,7 @@ internal fun LedgerBackPage(
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf(
                                 EntryTypeFilter.ALL to "전체",
-                                EntryTypeFilter.EXPENSE to "지출",
+                                EntryTypeFilter.EXPENSE to "소비",
                                 EntryTypeFilter.INCOME to "수입",
                                 EntryTypeFilter.TRANSFER to "이체"
                             ).forEach { (filter, label) ->
@@ -318,6 +461,29 @@ internal fun LedgerBackPage(
                     }
                 }
             }
+        }
+
+        item {
+            ManualEntrySection(
+                state = state,
+                manualType = manualType,
+                manualKind = manualKind,
+                amount = manualAmount,
+                description = manualDescription,
+                merchant = manualMerchant,
+                category = manualCategory,
+                onTypeChange = onManualTypeChange,
+                onKindChange = onManualKindChange,
+                onAmountChange = onManualAmountChange,
+                onDescriptionChange = onManualDescriptionChange,
+                onMerchantChange = onManualMerchantChange,
+                onSave = onSaveManual,
+                onLoadManualFromEntry = onLoadManualFromEntry,
+                onSaveTemplate = onSaveTemplate,
+                onRunTemplate = onRunTemplate,
+                onDeleteTemplate = onDeleteTemplate,
+                onRefreshRecurring = onRefreshRecurring
+            )
         }
 
         item {
@@ -434,26 +600,35 @@ private fun CalendarLedgerSection(
     val totalCells = ((firstDayOffset + daysInMonth + 6) / 7) * 7
     val weekNames = listOf("일", "월", "화", "수", "목", "금", "토")
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF3F4F6))
+    ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
                 "${month.year}년 ${month.monthValue}월 달력",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold
             )
 
             Row(modifier = Modifier.fillMaxWidth()) {
-                weekNames.forEach { dayName ->
+                weekNames.forEachIndexed { index, dayName ->
+                    val dayColor = when (index) {
+                        0 -> Color(0xFFD97706)
+                        6 -> Color(0xFF64748B)
+                        else -> Color(0xFF6B7280)
+                    }
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .padding(vertical = 4.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(dayName, color = Color(0xFF5B6470), fontWeight = FontWeight.SemiBold)
+                        Text(dayName, color = dayColor, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -467,6 +642,7 @@ private fun CalendarLedgerSection(
                             CalendarDayCell(
                                 modifier = Modifier.weight(1f),
                                 day = day,
+                                weekDayIndex = indexInWeek,
                                 summary = daySummaryMap[day],
                                 selected = day == selectedDay,
                                 onClick = { onSelectDay(day) }
@@ -475,8 +651,8 @@ private fun CalendarLedgerSection(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .padding(3.dp)
-                                    .height(78.dp)
+                                    .padding(2.dp)
+                                    .height(88.dp)
                             )
                         }
                     }
@@ -490,40 +666,85 @@ private fun CalendarLedgerSection(
 private fun CalendarDayCell(
     modifier: Modifier,
     day: Int,
+    weekDayIndex: Int,
     summary: DayLedgerSummary?,
     selected: Boolean,
     onClick: () -> Unit
 ) {
+    val dayNumberColor = when (weekDayIndex) {
+        0 -> Color(0xFFD97706)
+        6 -> Color(0xFF334155)
+        else -> Color(0xFF111827)
+    }
     Card(
-        modifier = modifier.padding(3.dp),
+        modifier = modifier.padding(2.dp),
+        shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (selected) Color(0xFFE8F1FF) else Color(0xFFFFFFFF)
+            containerColor = if (selected) Color(0xFFE8F2FF) else Color(0xFFFFFFFF)
         ),
         border = BorderStroke(
             width = if (selected) 1.5.dp else 1.dp,
-            color = if (selected) Color(0xFF5B7CB0) else Color(0xFFE2E8F0)
+            color = if (selected) Color(0xFF5B7CB0) else Color(0xFFD5DBE3)
         ),
         onClick = onClick
     ) {
+        val amountLine = remember(summary) { buildCalendarAmountLine(summary) }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(78.dp)
-                .padding(horizontal = 6.dp, vertical = 4.dp),
+                .height(88.dp)
+                .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(day.toString(), fontWeight = FontWeight.Bold)
-            if (summary != null) {
-                if (summary.expense > 0L) {
-                    Text("-${summary.expense}", style = MaterialTheme.typography.labelSmall, color = Color(0xFFB33232))
-                }
-                if (summary.income > 0L) {
-                    Text("+${summary.income}", style = MaterialTheme.typography.labelSmall, color = Color(0xFF1C7A4F))
-                }
-            } else {
-                Text("-", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8))
-            }
+            Text(day.toString(), fontWeight = FontWeight.ExtraBold, color = dayNumberColor)
+            Text(
+                text = amountLine.text,
+                style = MaterialTheme.typography.labelSmall,
+                color = amountLine.color,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
+    }
+}
+
+private data class CalendarAmountLine(
+    val text: String,
+    val color: Color
+)
+
+private fun buildCalendarAmountLine(summary: DayLedgerSummary?): CalendarAmountLine {
+    if (summary == null) {
+        return CalendarAmountLine(
+            text = "-",
+            color = Color(0xFF94A3B8)
+        )
+    }
+
+    val hasExpense = summary.expense > 0L
+    val hasIncome = summary.income > 0L
+
+    return when {
+        hasExpense && hasIncome -> CalendarAmountLine(
+            text = "소비 ${formatCalendarAmount(summary.expense)} · 수입 ${formatCalendarAmount(summary.income)}",
+            color = Color(0xFF334155)
+        )
+
+        hasExpense -> CalendarAmountLine(
+            text = "소비 ${formatCalendarAmount(summary.expense)}",
+            color = Color(0xFFB33232)
+        )
+
+        hasIncome -> CalendarAmountLine(
+            text = "수입 ${formatCalendarAmount(summary.income)}",
+            color = Color(0xFF1C7A4F)
+        )
+
+        else -> CalendarAmountLine(
+            text = "-",
+            color = Color(0xFF94A3B8)
+        )
     }
 }
 
@@ -733,7 +954,7 @@ private fun ChecklistEntryRow(
                 val date = entry.occurredAt.format(DateTimeFormatter.ofPattern("MM-dd"))
                 val typeLabel = when (entry.type) {
                     EntryType.INCOME -> "수입"
-                    EntryType.EXPENSE -> "지출"
+                    EntryType.EXPENSE -> "소비"
                     EntryType.TRANSFER -> "이체"
                 }
                 Row(
@@ -775,6 +996,10 @@ private data class CategoryExpenseChartPoint(
     val amount: Long,
     val color: Color
 )
+
+private fun formatCalendarAmount(amount: Long): String {
+    return String.format(Locale.KOREA, "%,d", amount)
+}
 
 private fun buildDaySummaryMap(entries: List<LedgerEntry>): Map<Int, DayLedgerSummary> {
     val map = mutableMapOf<Int, DayLedgerSummary>()
@@ -850,7 +1075,7 @@ private fun EntryRow(
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             val typeLabel = when (entry.type) {
                 EntryType.INCOME -> "수입"
-                EntryType.EXPENSE -> "지출"
+                EntryType.EXPENSE -> "소비"
                 EntryType.TRANSFER -> "이체"
             }
             val date = entry.occurredAt.format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
@@ -917,4 +1142,3 @@ private fun inferPaymentMethod(entry: LedgerEntry): PaymentMethodFilter {
         else -> PaymentMethodFilter.OTHER
     }
 }
-

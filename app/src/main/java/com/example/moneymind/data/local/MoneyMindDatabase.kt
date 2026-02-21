@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MonthlyClosingEntity::class,
         ClassificationRuleEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class MoneyMindDatabase : RoomDatabase() {
@@ -156,6 +156,14 @@ abstract class MoneyMindDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE classification_rules ADD COLUMN forcedType TEXT"
+                )
+            }
+        }
+
         @Volatile
         private var instance: MoneyMindDatabase? = null
 
@@ -168,6 +176,7 @@ abstract class MoneyMindDatabase : RoomDatabase() {
                 )
                     .addMigrations(MIGRATION_1_2)
                     .addMigrations(MIGRATION_2_3)
+                    .addMigrations(MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }

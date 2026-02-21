@@ -63,34 +63,43 @@ class ClassificationEngine(
         val enabledRules = classificationRules
             .filter { it.enabled && it.keyword.isNotBlank() }
             .sortedByDescending { it.keyword.length }
+        val categoryHistory = buildCategoryHistory(existing).toMutableMap()
 
         val firstPass = records.map { record ->
             val isTransfer = internalTransferDetector.isInternalTransfer(record, ownedAccounts, ownerAliases)
-            val type = when {
+            val initialType = when {
                 isTransfer -> EntryType.TRANSFER
                 record.signedAmount < 0L -> EntryType.EXPENSE
                 else -> EntryType.INCOME
             }
+            val matchedRule = findMatchedRule(record.description, record.merchant, enabledRules)
+            val type = matchedRule?.forcedType ?: initialType
 
             val detectedKind = if (type == EntryType.EXPENSE) {
-                detectSpendingKind(record.description, record.merchant)
+                detectSpendingKind(record.description, record.merchant, record.raw)
             } else {
                 SpendingKind.NORMAL
             }
 
-            val matchedRule = if (type == EntryType.EXPENSE) {
-                findMatchedRule(record.description, record.merchant, enabledRules)
+            val spendingKind = if (type == EntryType.EXPENSE) {
+                matchedRule?.spendingKind ?: detectedKind
+            } else {
+                SpendingKind.NORMAL
+            }
+            val transferCategory = if (isTransfer) "\uB0B4\uBD80\uACC4\uC88C\uC774\uCCB4" else "\uC774\uCCB4"
+            val recommendedCategory = if (type == EntryType.EXPENSE && matchedRule == null) {
+                findRecommendedCategory(record.description, record.merchant, categoryHistory)
             } else {
                 null
             }
-            val spendingKind = matchedRule?.spendingKind ?: detectedKind
 
             val category = when {
-                isTransfer -> "\uB0B4\uBD80\uACC4\uC88C\uC774\uCCB4"
+                matchedRule != null && matchedRule.category.isNotBlank() -> matchedRule.category
+                type == EntryType.TRANSFER -> transferCategory
                 type == EntryType.INCOME -> detectIncomeCategory(record.description)
-                matchedRule != null -> matchedRule.category.ifBlank { defaultCategoryFor(spendingKind, type) }
                 spendingKind == SpendingKind.LOAN -> "\uB300\uCD9C\uC0C1\uD658"
                 spendingKind == SpendingKind.INSTALLMENT -> "\uD560\uBD80"
+                !recommendedCategory.isNullOrBlank() -> recommendedCategory
                 else -> detectExpenseCategory(record.description)
             }
 
@@ -103,10 +112,16 @@ class ClassificationEngine(
                 merchant = record.merchant,
                 source = record.source,
                 spendingKind = spendingKind,
-                countedInExpense = type == EntryType.EXPENSE && !isTransfer,
+                countedInExpense = type == EntryType.EXPENSE,
                 accountMask = record.accountMask,
                 counterpartyName = record.counterpartyName
-            )
+            ).also { entry ->
+                if (entry.type == EntryType.EXPENSE && entry.countedInExpense) {
+                    categoryHistoryKeys(entry.description, entry.merchant).forEach { key ->
+                        categoryHistory[key] = entry.category
+                    }
+                }
+            }
         }
 
         val merged = (existing + firstPass).sortedBy { it.occurredAt }
@@ -129,14 +144,23 @@ class ClassificationEngine(
     }
 
     fun applyRuleIfMatched(entry: LedgerEntry, rules: List<ClassificationRule>): LedgerEntry {
-        if (entry.type != EntryType.EXPENSE || rules.isEmpty()) return entry
+        if (rules.isEmpty()) return entry
 
         val matchedRule = findMatchedRule(entry.description, entry.merchant, rules)
             ?: return entry
 
+        val resolvedType = matchedRule.forcedType ?: entry.type
+        val resolvedKind = if (resolvedType == EntryType.EXPENSE) {
+            matchedRule.spendingKind
+        } else {
+            SpendingKind.NORMAL
+        }
+
         return entry.copy(
-            spendingKind = matchedRule.spendingKind,
-            category = matchedRule.category.ifBlank { defaultCategoryFor(matchedRule.spendingKind, entry.type) }
+            type = resolvedType,
+            spendingKind = resolvedKind,
+            category = matchedRule.category.ifBlank { defaultCategoryFor(resolvedKind, resolvedType) },
+            countedInExpense = resolvedType == EntryType.EXPENSE
         )
     }
 
@@ -159,8 +183,17 @@ class ClassificationEngine(
         return "\uAE30\uD0C0\uC9C0\uCD9C"
     }
 
-    private fun detectSpendingKind(description: String, merchant: String?): SpendingKind {
-        val merged = "${description.lowercase()} ${merchant.orEmpty().lowercase()}"
+    private fun detectSpendingKind(
+        description: String,
+        merchant: String?,
+        raw: Map<String, String>
+    ): SpendingKind {
+        val normalizedRaw = raw.entries.associate { (key, value) ->
+            normalizeRawKey(key) to value.trim()
+        }
+        val installmentHint = installmentHintKeys.firstNotNullOfOrNull { key -> normalizedRaw[key] }
+            .orEmpty()
+        val merged = "${description.lowercase()} ${merchant.orEmpty().lowercase()} ${installmentHint.lowercase()}"
 
         if (loanKeywords.any { merged.contains(it.lowercase()) }) {
             return SpendingKind.LOAN
@@ -175,9 +208,9 @@ class ClassificationEngine(
         }
 
         installmentFractionPattern.find(merged)?.let { match ->
-            val current = match.groupValues.getOrNull(1)?.toIntOrNull() ?: return@let
-            val total = match.groupValues.getOrNull(2)?.toIntOrNull() ?: return@let
-            if (current in 1..99 && total in 2..99 && current <= total) {
+            val first = match.groupValues.getOrNull(1)?.toIntOrNull() ?: return@let
+            val second = match.groupValues.getOrNull(2)?.toIntOrNull() ?: return@let
+            if (first in 1..99 && second in 1..99 && (first >= 2 || second >= 2)) {
                 return SpendingKind.INSTALLMENT
             }
         }
@@ -187,6 +220,18 @@ class ClassificationEngine(
         }
 
         return SpendingKind.NORMAL
+    }
+
+    private fun normalizeRawKey(value: String): String {
+        return value.trim().lowercase()
+            .replace(" ", "")
+            .replace("_", "")
+            .replace("-", "")
+            .replace("/", "")
+            .replace(".", "")
+            .replace(":", "")
+            .replace("(", "")
+            .replace(")", "")
     }
 
     private fun findMatchedRule(
@@ -222,6 +267,58 @@ class ClassificationEngine(
         return "$normalizedMerchant:${entry.amount}"
     }
 
+    private fun buildCategoryHistory(entries: List<LedgerEntry>): Map<String, String> {
+        val map = mutableMapOf<String, String>()
+        entries
+            .asSequence()
+            .filter { it.type == EntryType.EXPENSE && it.countedInExpense }
+            .filter { it.category.isNotBlank() }
+            .sortedByDescending { it.occurredAt }
+            .forEach { entry ->
+                categoryHistoryKeys(entry.description, entry.merchant).forEach { key ->
+                    map.putIfAbsent(key, entry.category)
+                }
+            }
+        return map
+    }
+
+    private fun findRecommendedCategory(
+        description: String,
+        merchant: String?,
+        history: Map<String, String>
+    ): String? {
+        return categoryHistoryKeys(description, merchant)
+            .firstNotNullOfOrNull { key -> history[key] }
+    }
+
+    private fun categoryHistoryKeys(description: String, merchant: String?): List<String> {
+        val merchantKey = normalizeMerchantToken(merchant.orEmpty())
+        val descriptionKey = normalizeDescriptionToken(description)
+        return buildList {
+            if (merchantKey.length >= 2) {
+                add("merchant:$merchantKey")
+            }
+            if (descriptionKey.length >= 4) {
+                add("description:$descriptionKey")
+            }
+            if (merchantKey.isNotBlank() && descriptionKey.isNotBlank()) {
+                add("pair:$merchantKey|$descriptionKey")
+            }
+        }
+    }
+
+    private fun normalizeMerchantToken(value: String): String {
+        return value.lowercase()
+            .replace(Regex("[^0-9a-z가-힣]"), "")
+            .take(24)
+    }
+
+    private fun normalizeDescriptionToken(value: String): String {
+        return value.lowercase()
+            .replace(Regex("[^0-9a-z가-힣]"), "")
+            .take(24)
+    }
+
     private fun detectSubscriptions(entries: List<LedgerEntry>): Set<String> {
         val expenseCandidates = entries.filter {
             it.type == EntryType.EXPENSE &&
@@ -245,5 +342,26 @@ class ClassificationEngine(
             }
         }
         return result
+    }
+
+    companion object {
+        private val installmentHintKeys = listOf(
+            "할부/회차",
+            "할부회차",
+            "할부",
+            "회차",
+            "개월",
+            "분할"
+        ).map { key ->
+            key.trim().lowercase()
+                .replace(" ", "")
+                .replace("_", "")
+                .replace("-", "")
+                .replace("/", "")
+                .replace(".", "")
+                .replace(":", "")
+                .replace("(", "")
+                .replace(")", "")
+        }
     }
 }
