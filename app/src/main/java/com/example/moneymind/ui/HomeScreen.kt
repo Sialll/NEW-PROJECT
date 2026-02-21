@@ -145,7 +145,7 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
     val state by vm.uiState.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val pagerState = rememberPagerState(pageCount = { 4 })
     val scope = rememberCoroutineScope()
 
     var cardLast4Input by rememberSaveable { mutableStateOf("") }
@@ -161,7 +161,7 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
     var manualCategory by rememberSaveable { mutableStateOf("") }
 
     var optionSectionName by rememberSaveable { mutableStateOf(OptionSection.FILE.name) }
-    var ledgerViewModeName by rememberSaveable { mutableStateOf(LedgerViewMode.CALENDAR.name) }
+    var ledgerViewModeName by rememberSaveable { mutableStateOf(LedgerViewMode.CHECKLIST.name) }
     var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(LocalDate.now().dayOfMonth) }
     var checkedEntryIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
     var pendingExportType by rememberSaveable { mutableStateOf(CsvExportType.ANALYSIS.name) }
@@ -181,7 +181,7 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
     val manualKind = runCatching { SpendingKind.valueOf(manualKindName) }.getOrDefault(SpendingKind.NORMAL)
     val optionSection = runCatching { OptionSection.valueOf(optionSectionName) }.getOrDefault(OptionSection.FILE)
     val ledgerViewMode = runCatching { LedgerViewMode.valueOf(ledgerViewModeName) }
-        .getOrDefault(LedgerViewMode.CALENDAR)
+        .getOrDefault(LedgerViewMode.CHECKLIST)
     val editType = runCatching { EntryType.valueOf(editTypeName) }.getOrDefault(EntryType.EXPENSE)
     val editKind = runCatching { SpendingKind.valueOf(editKindName) }.getOrDefault(SpendingKind.NORMAL)
 
@@ -236,14 +236,19 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                             onClick = { scope.launch { pagerState.animateScrollToPage(0) } }
                         )
                         TopNavButton(
-                            label = "가계부",
+                            label = "달력",
                             selected = pagerState.currentPage == 1,
                             onClick = { scope.launch { pagerState.animateScrollToPage(1) } }
                         )
                         TopNavButton(
-                            label = "옵션",
+                            label = "가계부",
                             selected = pagerState.currentPage == 2,
                             onClick = { scope.launch { pagerState.animateScrollToPage(2) } }
+                        )
+                        TopNavButton(
+                            label = "옵션",
+                            selected = pagerState.currentPage == 3,
+                            onClick = { scope.launch { pagerState.animateScrollToPage(3) } }
                         )
                     }
                 }
@@ -261,7 +266,25 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
         ) { page ->
             when (page) {
                 0 -> MainDashboardPage(state = state)
-                1 -> LedgerBackPage(
+                1 -> CalendarFocusPage(
+                    state = state,
+                    selectedDayOfMonth = selectedDayOfMonth,
+                    onSelectDay = { selectedDayOfMonth = it },
+                    onEditEntry = { entry ->
+                        editingEntryId = entry.id
+                        editTypeName = entry.type.name
+                        editKindName = entry.spendingKind.name
+                        editAmount = entry.amount.toString()
+                        editDescription = entry.description
+                        editMerchant = entry.merchant.orEmpty()
+                        editCategory = entry.category
+                    },
+                    onDeleteEntry = { entry ->
+                        deleteTargetEntryId = entry.id
+                        checkedEntryIds = checkedEntryIds - entry.id
+                    }
+                )
+                2 -> LedgerBackPage(
                     state = state,
                     viewMode = ledgerViewMode,
                     selectedDayOfMonth = selectedDayOfMonth,

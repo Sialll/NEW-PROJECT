@@ -94,6 +94,299 @@ import kotlin.math.roundToInt
 
 
 @Composable
+internal fun CalendarFocusPage(
+    state: HomeUiState,
+    selectedDayOfMonth: Int,
+    onSelectDay: (Int) -> Unit,
+    onEditEntry: (LedgerEntry) -> Unit,
+    onDeleteEntry: (LedgerEntry) -> Unit
+) {
+    var monthOffset by rememberSaveable { mutableIntStateOf(0) }
+    val month = YearMonth.now().plusMonths(monthOffset.toLong())
+    val safeSelectedDay = selectedDayOfMonth.coerceIn(1, month.lengthOfMonth())
+
+    LaunchedEffect(month, selectedDayOfMonth) {
+        if (selectedDayOfMonth > month.lengthOfMonth()) {
+            onSelectDay(month.lengthOfMonth())
+        }
+    }
+
+    val monthEntries by remember(state.entries, month) {
+        derivedStateOf {
+            state.entries
+                .asSequence()
+                .filter { YearMonth.from(it.occurredAt) == month }
+                .sortedByDescending { it.occurredAt }
+                .toList()
+        }
+    }
+    val daySummaryMap by remember(monthEntries) {
+        derivedStateOf { buildDaySummaryMap(monthEntries) }
+    }
+    val selectedDayEntries by remember(monthEntries, safeSelectedDay) {
+        derivedStateOf {
+            monthEntries.filter { it.occurredAt.dayOfMonth == safeSelectedDay }
+        }
+    }
+    val monthExpense by remember(monthEntries) {
+        derivedStateOf {
+            monthEntries
+                .filter { it.type == EntryType.EXPENSE && it.countedInExpense }
+                .sumOf { it.amount }
+        }
+    }
+    val monthIncome by remember(monthEntries) {
+        derivedStateOf {
+            monthEntries
+                .filter { it.type == EntryType.INCOME }
+                .sumOf { it.amount }
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(UiSpace.l),
+        verticalArrangement = Arrangement.spacedBy(UiSpace.m)
+    ) {
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FBFF)),
+                border = BorderStroke(1.dp, Color(0xFFCED8EA))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = { monthOffset -= 1 }) { Text("이전달") }
+                        Text(
+                            text = "${month.year}년 ${month.monthValue}월 달력",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        TextButton(onClick = { monthOffset += 1 }) { Text("다음달") }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "소비 ${formatCalendarAmountCompact(monthExpense)}",
+                            color = Color(0xFFB42318),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "수입 ${formatCalendarAmountCompact(monthIncome)}",
+                            color = Color(0xFF067647),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            FocusCalendarSection(
+                month = month,
+                selectedDay = safeSelectedDay,
+                daySummaryMap = daySummaryMap,
+                onSelectDay = onSelectDay
+            )
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFDFCF8)),
+                border = BorderStroke(1.dp, Color(0xFFE2D6B8))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("${safeSelectedDay}일 거래", fontWeight = FontWeight.Bold)
+                    if (selectedDayEntries.isEmpty()) {
+                        Text("선택한 날짜의 거래가 없습니다.")
+                    } else {
+                        selectedDayEntries.forEach { entry ->
+                            EntryRow(
+                                entry = entry,
+                                onEdit = { onEditEntry(entry) },
+                                onDelete = { onDeleteEntry(entry) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FocusCalendarSection(
+    month: YearMonth,
+    selectedDay: Int,
+    daySummaryMap: Map<Int, DayLedgerSummary>,
+    onSelectDay: (Int) -> Unit
+) {
+    val daysInMonth = month.lengthOfMonth()
+    val firstDayOffset = month.atDay(1).dayOfWeek.value % 7
+    val totalCells = ((firstDayOffset + daysInMonth + 6) / 7) * 7
+    val weekNames = listOf("일", "월", "화", "수", "목", "금", "토")
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFFFF)),
+        border = BorderStroke(1.dp, Color(0xFFD7DCE5))
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                weekNames.forEachIndexed { index, dayName ->
+                    val dayColor = when (index) {
+                        0 -> Color(0xFFDC2626)
+                        6 -> Color(0xFF2563EB)
+                        else -> Color(0xFF6B7280)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(vertical = 2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = dayName,
+                            color = dayColor,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            for (week in 0 until totalCells / 7) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    for (indexInWeek in 0 until 7) {
+                        val index = week * 7 + indexInWeek
+                        val day = index - firstDayOffset + 1
+                        if (day in 1..daysInMonth) {
+                            FocusCalendarDayCell(
+                                modifier = Modifier.weight(1f),
+                                month = month,
+                                day = day,
+                                weekDayIndex = indexInWeek,
+                                summary = daySummaryMap[day],
+                                selected = day == selectedDay,
+                                onClick = { onSelectDay(day) }
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(1.dp)
+                                    .height(104.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FocusCalendarDayCell(
+    modifier: Modifier,
+    month: YearMonth,
+    day: Int,
+    weekDayIndex: Int,
+    summary: DayLedgerSummary?,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val isToday = month == YearMonth.now() && day == LocalDate.now().dayOfMonth
+    val dayNumberColor = when (weekDayIndex) {
+        0 -> Color(0xFFDC2626)
+        6 -> Color(0xFF2563EB)
+        else -> Color(0xFF111827)
+    }
+    val cell = remember(summary) { buildCalendarDayCellText(summary) }
+
+    Card(
+        modifier = modifier.padding(1.dp),
+        shape = RoundedCornerShape(6.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                selected -> Color(0xFFEAF2FF)
+                isToday -> Color(0xFFF8FBFF)
+                else -> Color(0xFFFFFFFF)
+            }
+        ),
+        border = BorderStroke(
+            width = if (selected) 1.5.dp else 0.8.dp,
+            color = when {
+                selected -> Color(0xFF4B73B9)
+                isToday -> Color(0xFFA6BFEB)
+                else -> Color(0xFFE2E8F0)
+            }
+        ),
+        onClick = onClick
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(104.dp)
+                .padding(horizontal = 7.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                text = day.toString(),
+                color = dayNumberColor,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            if (cell.expenseText == null && cell.incomeText == null) {
+                Text(
+                    text = "-",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF9CA3AF),
+                    fontWeight = FontWeight.SemiBold
+                )
+            } else {
+                if (cell.expenseText != null) {
+                    Text(
+                        text = cell.expenseText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFFB42318),
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (cell.incomeText != null) {
+                    Text(
+                        text = cell.incomeText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFF067647),
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun LedgerBackPage(
     state: HomeUiState,
     viewMode: LedgerViewMode,
@@ -236,8 +529,8 @@ internal fun LedgerBackPage(
                     modifier = Modifier.padding(UiSpace.m),
                     verticalArrangement = Arrangement.spacedBy(UiSpace.s)
                 ) {
-                    ScreenTitle("일반 가계부")
-                    SupportingText("달력식과 체크리스트 방식 중 원하는 보기로 확인하세요.")
+                    ScreenTitle("가계부 입력/리스트")
+                    SupportingText("달력은 '달력' 탭에서 크게 확인하세요.")
                     SupportingText(
                         if (manualCategory.isBlank()) {
                             "현재 입력 카테고리: 미선택"
@@ -366,18 +659,7 @@ internal fun LedgerBackPage(
                         Text("${month.year}년 ${month.monthValue}월", fontWeight = FontWeight.Bold)
                     TextButton(onClick = { monthOffset += 1 }) { Text("다음달") }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = viewMode == LedgerViewMode.CALENDAR,
-                            onClick = { onViewModeChange(LedgerViewMode.CALENDAR) },
-                            label = { Text("달력식") }
-                        )
-                        FilterChip(
-                            selected = viewMode == LedgerViewMode.CHECKLIST,
-                            onClick = { onViewModeChange(LedgerViewMode.CHECKLIST) },
-                            label = { Text("체크리스트") }
-                        )
-                    }
+                    Text("현재 화면은 거래 리스트 중심입니다.", style = MaterialTheme.typography.bodySmall)
                     CleanField(
                         value = keywordFilter,
                         onValueChange = { keywordFilter = it },
@@ -731,40 +1013,32 @@ private fun CalendarDayCell(
                     color = dayNumberColor,
                     style = MaterialTheme.typography.labelLarge
                 )
-                if (isToday) {
-                    Text(
-                        text = "오늘",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF2563EB),
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
             }
 
             if (cell.expenseText == null && cell.incomeText == null) {
                 Text(
                     text = "-",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF9CA3AF),
                     fontWeight = FontWeight.SemiBold
                 )
             } else {
                 if (cell.expenseText != null) {
                     Text(
-                        text = "소비 ${cell.expenseText}",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = cell.expenseText,
+                        style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFFB42318),
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
                 if (cell.incomeText != null) {
                     Text(
-                        text = "수입 ${cell.incomeText}",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = cell.incomeText,
+                        style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF067647),
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -808,7 +1082,7 @@ private fun formatCalendarAmountCompact(amount: Long): String {
     val absAmount = kotlin.math.abs(amount)
     return when {
         absAmount >= 100_000_000L -> String.format(Locale.KOREA, "%.1f억", absAmount / 100_000_000.0)
-        absAmount >= 10_000L -> String.format(Locale.KOREA, "%.1f만", absAmount / 10_000.0)
+        absAmount >= 10_000L -> String.format(Locale.KOREA, "%.0f만", absAmount / 10_000.0)
         else -> String.format(Locale.KOREA, "%,d", absAmount)
     }
 }
