@@ -269,7 +269,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addCustomCategory(category: String) {
-        val normalized = category.trim()
+        val normalized = normalizeCategoryInput(category)
         if (normalized.isBlank()) return
 
         val updated = customCategories.value + normalized
@@ -277,17 +277,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putStringSet(PREF_CUSTOM_CATEGORIES, updated).apply()
 
         _uiState.update { state ->
-            val merged = (state.categoryOptions + normalized)
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .distinct()
-                .sorted()
+            val merged = buildCategoryOptions(
+                entries = state.entries,
+                templates = state.quickTemplates,
+                rules = state.classificationRules,
+                customCategories = updated
+            )
             state.copy(categoryOptions = merged)
         }
     }
 
     fun removeCustomCategory(category: String) {
-        val normalized = category.trim()
+        val normalized = normalizeCategoryInput(category)
         if (normalized.isBlank()) return
 
         val current = customCategories.value
@@ -298,15 +299,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putStringSet(PREF_CUSTOM_CATEGORIES, updated).apply()
 
         _uiState.update { state ->
-            val merged = state.categoryOptions
-                .filter { it != normalized }
-                .sorted()
+            val merged = buildCategoryOptions(
+                entries = state.entries,
+                templates = state.quickTemplates,
+                rules = state.classificationRules,
+                customCategories = updated
+            )
             state.copy(categoryOptions = merged)
         }
     }
 
     fun togglePinnedCategory(category: String) {
-        val normalized = category.trim()
+        val normalized = normalizeCategoryInput(category)
         if (normalized.isBlank()) return
 
         val updated = if (normalized in pinnedCategories.value) {
@@ -1051,21 +1055,35 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         rules: List<ClassificationRule>,
         customCategories: Set<String>
     ): List<String> {
-        val dynamic = entries.map { it.category } +
-            templates.map { it.category } +
-            rules.map { it.category } +
-            customCategories
+        val merged = LinkedHashSet<String>(
+            HomeUiState.defaultCategoryOptions.size +
+                entries.size +
+                templates.size +
+                rules.size +
+                customCategories.size + 1
+        )
 
-        return (HomeUiState.defaultCategoryOptions + dynamic)
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sorted()
+        fun appendFrom(values: Iterable<String>) {
+            for (raw in values) {
+                val normalized = normalizeCategoryInput(raw)
+                if (normalized.isNotBlank()) {
+                    merged.add(normalized)
+                }
+            }
+        }
+
+        appendFrom(HomeUiState.defaultCategoryOptions)
+        appendFrom(entries.map { it.category })
+        appendFrom(templates.map { it.category })
+        appendFrom(rules.map { it.category })
+        appendFrom(customCategories)
+
+        return merged.toList().sorted()
     }
 
     private fun loadCustomCategories(): Set<String> {
         return prefs.getStringSet(PREF_CUSTOM_CATEGORIES, emptySet())
-            ?.map { it.trim() }
+            ?.map { normalizeCategoryInput(it) }
             ?.filter { it.isNotBlank() }
             ?.toSet()
             ?: emptySet()
@@ -1073,10 +1091,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadPinnedCategories(): Set<String> {
         return prefs.getStringSet(PREF_PINNED_CATEGORIES, emptySet())
-            ?.map { it.trim() }
+            ?.map { normalizeCategoryInput(it) }
             ?.filter { it.isNotBlank() }
             ?.toSet()
             ?: emptySet()
+    }
+
+    private fun normalizeCategoryInput(value: String): String {
+        return value.trim().replace(CATEGORY_WHITESPACE, " ")
     }
 
     private fun buildWarnings(plans: List<InstallmentPlan>, month: YearMonth): List<String> {
@@ -1343,5 +1365,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
         private val MIN_RESET_DATE: LocalDate = LocalDate.of(1970, 1, 1)
         private val MAX_RESET_DATE: LocalDate = LocalDate.of(9999, 12, 31)
+        private val CATEGORY_WHITESPACE = Regex("\\s+")
     }
 }

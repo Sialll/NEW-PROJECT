@@ -16,27 +16,41 @@ object SummaryCalculator {
     )
 
     fun summarize(entries: List<LedgerEntry>, month: YearMonth): MonthlySummary {
-        val monthly = entries.filter { YearMonth.from(it.occurredAt) == month }
-        val income = monthly.filter { it.type == EntryType.INCOME }.sumOf { it.amount }
-        val expense = monthly.filter { it.type == EntryType.EXPENSE && it.countedInExpense }.sumOf { it.amount }
-        val transfer = monthly.filter { it.type == EntryType.TRANSFER }.sumOf { it.amount }
-        val subscription = monthly
-            .filter {
-                it.type == EntryType.EXPENSE &&
-                    it.spendingKind == SpendingKind.SUBSCRIPTION &&
-                    it.countedInExpense
+        var income = 0L
+        var expense = 0L
+        var transfer = 0L
+        var subscription = 0L
+        var installment = 0L
+        var loan = 0L
+
+        for (entry in entries) {
+            if (YearMonth.from(entry.occurredAt) != month) {
+                continue
             }
-            .sumOf { it.amount }
-        val installment = monthly
-            .filter {
-                it.type == EntryType.EXPENSE &&
-                    it.spendingKind == SpendingKind.INSTALLMENT &&
-                    it.countedInExpense
+
+            when (entry.type) {
+                EntryType.INCOME -> {
+                    income += entry.amount
+                }
+                EntryType.TRANSFER -> {
+                    transfer += entry.amount
+                }
+                EntryType.EXPENSE -> {
+                    if (!entry.countedInExpense) continue
+                    expense += entry.amount
+
+                    when (entry.spendingKind) {
+                        SpendingKind.SUBSCRIPTION -> subscription += entry.amount
+                        SpendingKind.INSTALLMENT -> installment += entry.amount
+                        else -> { /* no-op */ }
+                    }
+
+                    if (isLoanExpense(entry)) {
+                        loan += entry.amount
+                    }
+                }
             }
-            .sumOf { it.amount }
-        val loan = monthly
-            .filter { it.type == EntryType.EXPENSE && it.countedInExpense && isLoanExpense(it) }
-            .sumOf { it.amount }
+        }
 
         return MonthlySummary(
             month = month,
