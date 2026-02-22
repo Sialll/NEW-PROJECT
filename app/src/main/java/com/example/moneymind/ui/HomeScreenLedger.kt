@@ -93,6 +93,12 @@ import kotlin.math.roundToInt
 
 
 
+internal enum class LedgerViewMode {
+    CALENDAR,
+    CHECKLIST
+}
+
+
 @Composable
 internal fun CalendarFocusPage(
     state: HomeUiState,
@@ -389,7 +395,6 @@ private fun FocusCalendarDayCell(
 @Composable
 internal fun LedgerBackPage(
     state: HomeUiState,
-    viewMode: LedgerViewMode,
     selectedDayOfMonth: Int,
     checkedEntryIds: Set<String>,
     manualType: EntryType,
@@ -399,8 +404,8 @@ internal fun LedgerBackPage(
     manualMerchant: String,
     manualCategory: String,
     categoryOptions: List<String>,
+    manualSaveSignal: Long,
     pinnedCategories: Set<String>,
-    onViewModeChange: (LedgerViewMode) -> Unit,
     onSelectDay: (Int) -> Unit,
     onToggleChecked: (String) -> Unit,
     onEditEntry: (LedgerEntry) -> Unit,
@@ -412,6 +417,7 @@ internal fun LedgerBackPage(
     onManualMerchantChange: (String) -> Unit,
     onManualCategoryChange: (String) -> Unit,
     onAddCategoryOption: (String) -> Unit,
+    onRemoveCategoryOption: (String) -> Unit,
     onToggleCategoryPin: (String) -> Unit,
     onSaveManual: () -> Unit,
     onLoadManualFromEntry: (LedgerEntry) -> Unit,
@@ -420,6 +426,7 @@ internal fun LedgerBackPage(
     onDeleteTemplate: (String) -> Unit,
     onRefreshRecurring: () -> Unit
 ) {
+    var viewMode by rememberSaveable { mutableStateOf(LedgerViewMode.CALENDAR) }
     var monthOffset by rememberSaveable { mutableIntStateOf(0) }
     var keywordFilter by rememberSaveable { mutableStateOf("") }
     var typeFilterName by rememberSaveable { mutableStateOf(EntryTypeFilter.ALL.name) }
@@ -429,8 +436,19 @@ internal fun LedgerBackPage(
     var toDayText by rememberSaveable { mutableStateOf("") }
     var showAdvancedFilters by rememberSaveable { mutableStateOf(false) }
     var highlightedEntryId by rememberSaveable { mutableStateOf<String?>(null) }
-    var addCategoryText by rememberSaveable { mutableStateOf("") }
-    var showAllCategories by rememberSaveable { mutableStateOf(false) }
+
+    val sharedCategoryOptions = remember(
+        state.entries,
+        categoryOptions,
+        state.customCategories,
+        manualCategory
+    ) {
+        (state.entries.map { it.category } + categoryOptions + state.customCategories + listOf(manualCategory))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
 
     val listState = rememberLazyListState()
     val listScope = rememberCoroutineScope()
@@ -538,116 +556,34 @@ internal fun LedgerBackPage(
                             "현재 입력 카테고리: $manualCategory"
                         }
                     )
-                    val allCategoryOptions = remember(state.entries, categoryOptions, manualCategory, pinnedCategories) {
-                        (state.entries.map { it.category } + categoryOptions + listOf(manualCategory))
-                            .map { it.trim() }
-                            .filter { it.isNotBlank() }
-                            .distinct()
-                            .sortedBy { it }
-                    }
-                    val recentCategoryOptions = remember(state.entries, categoryOptions, manualCategory, pinnedCategories) {
-                        val recentFromEntries = state.entries
-                            .sortedByDescending { it.occurredAt }
-                            .asSequence()
-                            .map { it.category.trim() }
-                            .filter { it.isNotBlank() }
-                            .distinct()
-                            .toList()
-
-                        (recentFromEntries + categoryOptions + listOf(manualCategory))
-                            .map { it.trim() }
-                            .filter { it.isNotBlank() }
-                            .distinct()
-                            .take(5)
-                    }
-                    val pinnedOptionList = remember(allCategoryOptions, pinnedCategories) {
-                        allCategoryOptions.filter { it in pinnedCategories }
-                    }
-                    val displayedCategoryOptions = remember(
-                        showAllCategories,
-                        allCategoryOptions,
-                        recentCategoryOptions,
-                        pinnedOptionList
-                    ) {
-                        if (showAllCategories) {
-                            pinnedOptionList + allCategoryOptions.filterNot { it in pinnedCategories }
-                        } else {
-                            if (pinnedOptionList.size >= 5) {
-                                pinnedOptionList
-                            } else {
-                                pinnedOptionList + recentCategoryOptions
-                                    .filterNot { it in pinnedCategories }
-                                    .take(5 - pinnedOptionList.size)
+                    CategorySelectField(
+                        value = manualCategory,
+                        options = sharedCategoryOptions,
+                        onValueChange = onManualCategoryChange,
+                        onAddCategory = { newCategory ->
+                            onAddCategoryOption(newCategory)
+                            onManualCategoryChange(newCategory)
+                        },
+                        onDeleteCategory = { removed ->
+                            if (manualCategory == removed) {
+                                onManualCategoryChange("")
                             }
-                        }.distinct()
-                    }
-                    if (displayedCategoryOptions.isEmpty()) {
-                        SupportingText("카테고리 없음: 아래에서 직접 추가해 주세요.")
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                SupportingText(
-                                    if (showAllCategories) "카테고리 전체" else "최근 카테고리 5개 (고정 우선)"
-                                )
-                                if (allCategoryOptions.size > 5) {
-                                    TextButton(onClick = { showAllCategories = !showAllCategories }) {
-                                    Text(if (showAllCategories) "접기" else "전체 보기")
+                            onRemoveCategoryOption(removed)
+                        },
+                        deletableCategoryOptions = state.customCategories,
+                        label = "카테고리"
+                    )
+                    if (manualCategory.isNotBlank()) {
+                        TextButton(
+                            onClick = { onToggleCategoryPin(manualCategory) }
+                        ) {
+                            Text(
+                                if (manualCategory in pinnedCategories) {
+                                    "현재 카테고리 고정 해제"
+                                } else {
+                                    "현재 카테고리 고정"
                                 }
-                            }
-                        }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            displayedCategoryOptions.forEach { category ->
-                                FilterChip(
-                                    selected = manualCategory == category,
-                                    onClick = { onManualCategoryChange(category) },
-                                    label = { Text(if (category in pinnedCategories) "★ $category" else category) }
-                                )
-                            }
-                        }
-                        if (manualCategory.isNotBlank()) {
-                            TextButton(
-                                onClick = { onToggleCategoryPin(manualCategory) }
-                            ) {
-                                Text(
-                                    if (manualCategory in pinnedCategories) {
-                                        "현재 카테고리 고정 해제"
-                                    } else {
-                                        "현재 카테고리 고정"
-                                    }
-                                )
-                            }
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            modifier = Modifier.weight(1f),
-                            value = addCategoryText,
-                            onValueChange = { addCategoryText = it.take(20) },
-                            label = { Text("카테고리 직접 추가") },
-                            singleLine = true
-                        )
-                        Button(
-                            onClick = {
-                                val normalized = addCategoryText.trim()
-                                if (normalized.isBlank()) return@Button
-                                onAddCategoryOption(normalized)
-                                onManualCategoryChange(normalized)
-                                addCategoryText = ""
-                            }
-                        ) {
-                            Text("추가")
+                            )
                         }
                     }
                     Row(
@@ -748,14 +684,18 @@ internal fun LedgerBackPage(
         }
 
         item {
-            ManualEntrySection(
-                state = state,
+                ManualEntrySection(
+                    state = state,
+                    manualCategorySeedOptions = sharedCategoryOptions,
                 manualType = manualType,
                 manualKind = manualKind,
                 amount = manualAmount,
                 description = manualDescription,
                 merchant = manualMerchant,
                 category = manualCategory,
+                onManualCategoryChange = onManualCategoryChange,
+                onAddCategoryOption = onAddCategoryOption,
+                onRemoveCategoryOption = onRemoveCategoryOption,
                 onTypeChange = onManualTypeChange,
                 onKindChange = onManualKindChange,
                 onAmountChange = onManualAmountChange,
@@ -778,8 +718,8 @@ internal fun LedgerBackPage(
                 onSelectDay = { day ->
                     highlightedEntryId = monthEntries.firstOrNull { it.occurredAt.dayOfMonth == day }?.id
                         ?: monthEntriesBase.firstOrNull { it.occurredAt.dayOfMonth == day }?.id
-                    onSelectDay(day)
-                    onViewModeChange(LedgerViewMode.CALENDAR)
+                onSelectDay(day)
+                    viewMode = LedgerViewMode.CALENDAR
                     listScope.launch {
                         delay(140)
                         listState.animateScrollToItem(selectedDaySectionIndex)
@@ -795,7 +735,7 @@ internal fun LedgerBackPage(
                 onSelectCategory = { category ->
                     categoryFilter = category
                     highlightedEntryId = monthEntriesBase.firstOrNull { it.category == category }?.id
-                    onViewModeChange(LedgerViewMode.CHECKLIST)
+                    viewMode = LedgerViewMode.CHECKLIST
                     listScope.launch {
                         delay(140)
                         listState.animateScrollToItem(checklistSectionIndex)
@@ -1477,3 +1417,4 @@ private fun inferPaymentMethod(entry: LedgerEntry): PaymentMethodFilter {
         else -> PaymentMethodFilter.OTHER
     }
 }
+

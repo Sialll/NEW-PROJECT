@@ -1,4 +1,4 @@
-﻿package com.example.moneymind.ui
+package com.example.moneymind.ui
 
 import android.content.Context
 import android.content.Intent
@@ -18,11 +18,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,13 +31,14 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -48,6 +49,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -69,7 +71,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -190,42 +191,62 @@ internal fun CleanField(
         )
     )
 }
-
 @Composable
 internal fun CategorySelectField(
     value: String,
     options: List<String>,
     onValueChange: (String) -> Unit,
     onAddCategory: (String) -> Unit,
-    label: String = "카테고리"
+    onDeleteCategory: ((String) -> Unit)? = null,
+    deletableCategoryOptions: Set<String> = emptySet(),
+    label: String = "Category"
 ) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
+    var pickerOpen by rememberSaveable { mutableStateOf(false) }
     var addMode by rememberSaveable { mutableStateOf(false) }
     var newCategory by rememberSaveable { mutableStateOf("") }
+    val maxCategoryLength = 20
 
-    val normalizedOptions = remember(options) {
-        options.asSequence()
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sorted()
-            .toList()
+    val normalizedOptions = options
+        .asSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .sorted()
+        .toList()
+
+    val normalizeCategoryInput: (String) -> String = { raw ->
+        raw.trim().replace(Regex("\\s+"), " ")
+    }
+    val normalizedNewCategory = normalizeCategoryInput(newCategory)
+    val duplicateNewCategory = normalizedNewCategory.isNotBlank() && normalizedOptions.contains(normalizedNewCategory)
+    val addModeSubmitEnabled =
+        normalizedNewCategory.isNotBlank() &&
+            !duplicateNewCategory &&
+            normalizedNewCategory.length <= maxCategoryLength
+
+    val isAddFlowNeeded = normalizedOptions.isEmpty()
+
+    val onDismissPicker: () -> Unit = {
+        pickerOpen = false
+        addMode = false
+        newCategory = ""
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = true }
-        ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
                 modifier = Modifier.fillMaxWidth(),
-                readOnly = true,
                 value = value,
                 onValueChange = {},
+                readOnly = true,
                 label = { Text(label) },
-                placeholder = { Text("카테고리 선택") },
-                trailingIcon = { Text(if (expanded) "▲" else "▼") },
+                placeholder = { Text("Select category") },
+                trailingIcon = {
+                    Icon(
+                        imageVector = if (pickerOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null
+                    )
+                },
                 shape = RoundedCornerShape(14.dp),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -233,79 +254,166 @@ internal fun CategorySelectField(
                     unfocusedBorderColor = Color(0xFFB8C0CC)
                 )
             )
-
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
-            ) {
-                DropdownMenuItem(
-                    text = { Text("자동 분류") },
-                    onClick = {
-                        onValueChange("")
-                        expanded = false
-                        addMode = false
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .height(56.dp)
+                    .clickable {
+                        addMode = isAddFlowNeeded
+                        pickerOpen = true
                     }
-                )
-
-                if (normalizedOptions.isNotEmpty()) {
-                    HorizontalDivider()
-                }
-
-                normalizedOptions.forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(option) },
-                        onClick = {
-                            onValueChange(option)
-                            expanded = false
-                            addMode = false
-                        }
-                    )
-                }
-
-                HorizontalDivider()
-
-                DropdownMenuItem(
-                    text = { Text("+ 카테고리 추가") },
-                    onClick = {
-                        addMode = true
-                        expanded = false
-                    }
-                )
-            }
+            )
         }
 
-        if (addMode) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    modifier = Modifier.weight(1f),
-                    value = newCategory,
-                    onValueChange = { newCategory = it.take(30) },
-                    label = { Text("새 카테고리") },
-                    singleLine = true
-                )
-                TextButton(
-                    onClick = {
-                        val normalized = newCategory.trim()
-                        if (normalized.isBlank()) return@TextButton
-                        onAddCategory(normalized)
-                        onValueChange(normalized)
-                        newCategory = ""
-                        addMode = false
+        if (pickerOpen) {
+            AlertDialog(
+                onDismissRequest = onDismissPicker,
+                title = { Text("Category") },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 340.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (!addMode) {
+                            if (normalizedOptions.isNotEmpty()) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 260.dp)
+                                        .verticalScroll(rememberScrollState())
+                                ) {
+                                    normalizedOptions.forEach { option ->
+                                        val canDelete = deletableCategoryOptions.contains(option)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 2.dp, horizontal = 6.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            TextButton(
+                                                onClick = {
+                                                    onValueChange(option)
+                                                    onDismissPicker()
+                                                },
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text(option)
+                                            }
+
+                                            if (canDelete && onDeleteCategory != null) {
+                                                TextButton(
+                                                    onClick = {
+                                                        onDeleteCategory(option)
+                                                        if (value == option) {
+                                                            onValueChange("")
+                                                        }
+                                                        onDismissPicker()
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                                ) {
+                                                    Text("Delete", color = Color(0xFFB42318))
+                                                }
+                                            }
+                                        }
+                                        HorizontalDivider(color = Color(0xFFE5E7EB))
+                                    }
+                                }
+                            } else {
+                                Text("No categories found. Tap \"Add category\" to register.")
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    value = newCategory,
+                                    onValueChange = { newCategory = it.take(32) },
+                                    label = { Text("New category") },
+                                    isError = duplicateNewCategory || normalizedNewCategory.length > maxCategoryLength,
+                                    supportingText = if (duplicateNewCategory || normalizedNewCategory.length > maxCategoryLength) {
+                                        {
+                                            if (normalizedNewCategory.length > maxCategoryLength) {
+                                                Text("Maximum ${maxCategoryLength} characters allowed.")
+                                            } else {
+                                                Text("This category is already registered.")
+                                            }
+                                        }
+                                    } else null,
+                                    singleLine = true
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TextButton(
+                                        onClick = {
+                                            if (!addModeSubmitEnabled) return@TextButton
+                                            onAddCategory(normalizedNewCategory)
+                                            onValueChange(normalizedNewCategory)
+                                            onDismissPicker()
+                                        },
+                                        enabled = addModeSubmitEnabled
+                                    ) {
+                                        Text("Add")
+                                    }
+
+                                    TextButton(
+                                        onClick = {
+                                            addMode = false
+                                            newCategory = ""
+                                        }
+                                    ) {
+                                        Text("Cancel")
+                                    }
+                                }
+                            }
+                        }
+
+                        if (value.isNotBlank()) {
+                            TextButton(onClick = { onValueChange("") }) {
+                                Text("Clear auto category")
+                            }
+                        }
                     }
-                ) {
-                    Text("추가")
+                },
+                confirmButton = {
+                    if (!addMode) {
+                        TextButton(
+                            onClick = {
+                                addMode = true
+                                newCategory = ""
+                            }
+                        ) {
+                            Text("Add category")
+                        }
+                    } else {
+                        TextButton(onClick = { addMode = false }) {
+                            Text("Back to list")
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismissPicker) {
+                        Text("Close")
+                    }
                 }
-            }
+            )
         }
     }
 }
+
 
 internal fun openNotificationListenerSettings(context: Context) {
     val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }
 }
+

@@ -19,4 +19,10 @@ interface MonthlyClosingDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: MonthlyClosingEntity)
+
+    @Query("DELETE FROM monthly_closings")
+    suspend fun deleteAll()
+
+    @Query("DELETE FROM monthly_closings WHERE month >= :startMonth AND month <= :endMonth")
+    suspend fun deleteByMonthRange(startMonth: String, endMonth: String)
 }

@@ -1,6 +1,7 @@
 ﻿package com.example.moneymind.data.repo
 
 import com.example.moneymind.data.local.BudgetTargetEntity
+import com.example.moneymind.data.local.CalendarMemoEntity
 import com.example.moneymind.data.local.ClassificationRuleEntity
 import com.example.moneymind.data.local.InstallmentPlanEntity
 import com.example.moneymind.data.local.LedgerEntryEntity
@@ -10,6 +11,7 @@ import com.example.moneymind.data.local.OwnedAccountEntity
 import com.example.moneymind.data.local.OwnerAliasEntity
 import com.example.moneymind.data.local.QuickTemplateEntity
 import com.example.moneymind.domain.BudgetTarget
+import com.example.moneymind.domain.CalendarMemo
 import com.example.moneymind.domain.ClassificationEngine
 import com.example.moneymind.domain.ClassificationRule
 import com.example.moneymind.domain.EntrySource
@@ -24,11 +26,13 @@ import com.example.moneymind.domain.QuickTemplate
 import com.example.moneymind.domain.SpendingKind
 import com.example.moneymind.security.SecureTextCipher
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.YearMonth
 import java.time.ZoneId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import androidx.room.withTransaction
 
 class LedgerRepository(
     private val database: MoneyMindDatabase,
@@ -60,6 +64,9 @@ class LedgerRepository(
 
     val classificationRulesFlow: Flow<List<ClassificationRule>> =
         database.classificationRuleDao().observeAll().map { list -> list.map { it.toDomain() } }
+
+    val calendarMemosFlow: Flow<List<CalendarMemo>> =
+        database.calendarMemoDao().observeAll().map { list -> list.map { it.toDomain() } }
 
     suspend fun addOwnerAlias(alias: String) {
         val normalized = alias.trim()
@@ -239,6 +246,7 @@ class LedgerRepository(
             database.ledgerDao().updateEntryById(
                 id = entry.id,
                 fingerprint = entryFingerprint(updated),
+                occurredAtMillis = updated.occurredAt.toEpochMillis(),
                 type = updated.type.name,
                 amount = updated.amount,
                 category = updated.category,
@@ -288,8 +296,27 @@ class LedgerRepository(
         )
     }
 
-    suspend fun addManualEntry(entry: LedgerEntry) {
-        if (entry.amount <= 0L || entry.description.isBlank()) return
+    suspend fun upsertCalendarMemo(date: LocalDate, memo: String) {
+        val normalized = memo.trim()
+        if (normalized.isBlank()) {
+            database.calendarMemoDao().deleteByDate(date.toString())
+            return
+        }
+        database.calendarMemoDao().upsert(
+            CalendarMemoEntity(
+                date = date.toString(),
+                memo = encryptText(normalized).orEmpty(),
+                updatedAtMillis = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun deleteCalendarMemo(date: LocalDate) {
+        database.calendarMemoDao().deleteByDate(date.toString())
+    }
+
+    suspend fun addManualEntry(entry: LedgerEntry): Boolean {
+        if (entry.amount <= 0L || entry.description.isBlank()) return false
 
         val normalizedType = when (entry.type) {
             EntryType.INCOME -> EntryType.INCOME
@@ -308,6 +335,7 @@ class LedgerRepository(
         // Manual entries should always be insertable even when amount/description match within the same minute.
         val manualFingerprint = "${entryFingerprint(normalized)}|manual|${normalized.id.takeLast(8)}"
         database.ledgerDao().upsert(normalized.toEntity(fingerprint = manualFingerprint))
+        return true
     }
 
     suspend fun updateEntry(
@@ -317,6 +345,7 @@ class LedgerRepository(
         description: String,
         category: String,
         merchant: String?,
+        occurredAt: LocalDateTime,
         spendingKind: SpendingKind
     ) {
         if (entryId.isBlank() || amount <= 0L || description.isBlank()) return
@@ -327,7 +356,7 @@ class LedgerRepository(
         }
         val entryLike = LedgerEntry(
             id = entryId,
-            occurredAt = LocalDateTime.now(),
+            occurredAt = occurredAt,
             amount = amount,
             type = type,
             category = resolvedCategory,
@@ -341,6 +370,7 @@ class LedgerRepository(
         database.ledgerDao().updateEntryById(
             id = entryId,
             fingerprint = entryFingerprint(entryLike),
+            occurredAtMillis = occurredAt.toEpochMillis(),
             type = type.name,
             amount = amount,
             category = resolvedCategory,
@@ -354,6 +384,54 @@ class LedgerRepository(
     suspend fun deleteEntry(entryId: String) {
         if (entryId.isBlank()) return
         database.ledgerDao().deleteById(entryId)
+    }
+
+    suspend fun clearAllRecords() {
+        database.withTransaction {
+            database.ledgerDao().deleteAll()
+            database.monthlyClosingDao().deleteAll()
+            database.calendarMemoDao().deleteAll()
+        }
+    }
+
+    suspend fun clearRecordsByPeriod(startDate: LocalDate, endDate: LocalDate) {
+        if (endDate.isBefore(startDate)) return
+
+        val startMillisInclusive = startDate
+            .atStartOfDay(zoneId)
+            .toInstant()
+            .toEpochMilli()
+        val endMillisExclusive = if (endDate == LocalDate.of(9999, 12, 31)) {
+            Long.MAX_VALUE
+        } else {
+            endDate
+                .plusDays(1)
+                .atStartOfDay(zoneId)
+                .toInstant()
+                .toEpochMilli()
+        }
+        val startMonth = YearMonth.from(startDate).toString()
+        val endMonth = YearMonth.from(endDate).toString()
+
+        database.withTransaction {
+            database.ledgerDao().deleteByOccurredAtRange(startMillisInclusive, endMillisExclusive)
+            database.calendarMemoDao().deleteByDateRange(startDate.toString(), endDate.toString())
+            database.monthlyClosingDao().deleteByMonthRange(startMonth, endMonth)
+        }
+    }
+
+    suspend fun clearFactoryData() {
+        database.withTransaction {
+            database.ledgerDao().deleteAll()
+            database.ownedAccountDao().deleteAll()
+            database.ownerAliasDao().deleteAll()
+            database.installmentPlanDao().deleteAll()
+            database.quickTemplateDao().deleteAll()
+            database.budgetTargetDao().deleteAll()
+            database.monthlyClosingDao().deleteAll()
+            database.classificationRuleDao().deleteAll()
+            database.calendarMemoDao().deleteAll()
+        }
     }
 
     suspend fun ingestParsedRecords(records: List<ParsedRecord>) {
@@ -541,6 +619,14 @@ class LedgerRepository(
             forcedType = forcedType?.let { runCatching { EntryType.valueOf(it) }.getOrNull() },
             enabled = enabled,
             createdAtMillis = createdAtMillis
+        )
+    }
+
+    private fun CalendarMemoEntity.toDomain(): CalendarMemo {
+        return CalendarMemo(
+            date = runCatching { LocalDate.parse(date) }.getOrDefault(LocalDate.now()),
+            text = decryptText(memo).orEmpty(),
+            updatedAtMillis = updatedAtMillis
         )
     }
 

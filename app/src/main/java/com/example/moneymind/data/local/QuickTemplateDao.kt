@@ -22,4 +22,7 @@ interface QuickTemplateDao {
 
     @Query("DELETE FROM quick_templates WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM quick_templates")
+    suspend fun deleteAll()
 }

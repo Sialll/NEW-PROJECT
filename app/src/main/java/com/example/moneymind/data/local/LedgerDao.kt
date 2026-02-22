@@ -27,6 +27,7 @@ interface LedgerDao {
         """
         UPDATE ledger_entries
         SET fingerprint = :fingerprint,
+            occurredAtMillis = :occurredAtMillis,
             type = :type,
             amount = :amount,
             category = :category,
@@ -40,6 +41,7 @@ interface LedgerDao {
     suspend fun updateEntryById(
         id: String,
         fingerprint: String,
+        occurredAtMillis: Long,
         type: String,
         amount: Long,
         category: String,
@@ -51,4 +53,19 @@ interface LedgerDao {
 
     @Query("DELETE FROM ledger_entries WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM ledger_entries")
+    suspend fun deleteAll()
+
+    @Query(
+        """
+        DELETE FROM ledger_entries
+        WHERE occurredAtMillis >= :startMillisInclusive
+          AND occurredAtMillis < :endMillisExclusive
+        """
+    )
+    suspend fun deleteByOccurredAtRange(
+        startMillisInclusive: Long,
+        endMillisExclusive: Long
+    )
 }

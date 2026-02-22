@@ -16,4 +16,7 @@ interface InstallmentPlanDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: InstallmentPlanEntity)
+
+    @Query("DELETE FROM installment_plans")
+    suspend fun deleteAll()
 }

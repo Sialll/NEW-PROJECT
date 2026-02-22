@@ -16,4 +16,7 @@ interface OwnerAliasDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: OwnerAliasEntity)
+
+    @Query("DELETE FROM owner_aliases")
+    suspend fun deleteAll()
 }

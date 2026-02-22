@@ -39,6 +39,9 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -53,6 +56,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -95,11 +99,6 @@ internal enum class OptionSection {
     FILE,
     PROFILE,
     CONTROL
-}
-
-internal enum class LedgerViewMode {
-    CALENDAR,
-    CHECKLIST
 }
 
 internal enum class EntryTypeFilter {
@@ -147,6 +146,7 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val pagerState = rememberPagerState(pageCount = { 4 })
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var cardLast4Input by rememberSaveable { mutableStateOf("") }
     var installmentMerchantInput by rememberSaveable { mutableStateOf("") }
@@ -159,9 +159,9 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
     var manualDesc by rememberSaveable { mutableStateOf("") }
     var manualMerchant by rememberSaveable { mutableStateOf("") }
     var manualCategory by rememberSaveable { mutableStateOf("") }
+    var manualSaveSignal by rememberSaveable { mutableLongStateOf(0L) }
 
     var optionSectionName by rememberSaveable { mutableStateOf(OptionSection.FILE.name) }
-    var ledgerViewModeName by rememberSaveable { mutableStateOf(LedgerViewMode.CHECKLIST.name) }
     var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(LocalDate.now().dayOfMonth) }
     var checkedEntryIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
     var pendingExportType by rememberSaveable { mutableStateOf(CsvExportType.ANALYSIS.name) }
@@ -180,8 +180,6 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
     val manualType = runCatching { EntryType.valueOf(manualTypeName) }.getOrDefault(EntryType.EXPENSE)
     val manualKind = runCatching { SpendingKind.valueOf(manualKindName) }.getOrDefault(SpendingKind.NORMAL)
     val optionSection = runCatching { OptionSection.valueOf(optionSectionName) }.getOrDefault(OptionSection.FILE)
-    val ledgerViewMode = runCatching { LedgerViewMode.valueOf(ledgerViewModeName) }
-        .getOrDefault(LedgerViewMode.CHECKLIST)
     val editType = runCatching { EntryType.valueOf(editTypeName) }.getOrDefault(EntryType.EXPENSE)
     val editKind = runCatching { SpendingKind.valueOf(editKindName) }.getOrDefault(SpendingKind.NORMAL)
 
@@ -224,7 +222,30 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
         vm.refreshSmsPermissionAccess()
     }
 
+    LaunchedEffect(state.lastInfo) {
+        val infoMessage = state.lastInfo
+        if (!infoMessage.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(
+                message = infoMessage,
+                duration = SnackbarDuration.Short
+            )
+            vm.clearInfoMessage()
+        }
+    }
+
+    LaunchedEffect(state.lastError) {
+        val errorMessage = state.lastError
+        if (!errorMessage.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(
+                message = errorMessage,
+                duration = SnackbarDuration.Short
+            )
+            vm.clearErrorMessage()
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("나만의 가계부") },
@@ -286,7 +307,6 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                 )
                 2 -> LedgerBackPage(
                     state = state,
-                    viewMode = ledgerViewMode,
                     selectedDayOfMonth = selectedDayOfMonth,
                     checkedEntryIds = checkedEntryIds,
                     manualType = manualType,
@@ -296,8 +316,8 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                     manualMerchant = manualMerchant,
                     manualCategory = manualCategory,
                     categoryOptions = state.categoryOptions,
+                    manualSaveSignal = manualSaveSignal,
                     pinnedCategories = state.pinnedCategories,
-                    onViewModeChange = { ledgerViewModeName = it.name },
                     onSelectDay = { selectedDayOfMonth = it },
                     onToggleChecked = { id ->
                         checkedEntryIds = if (id in checkedEntryIds) {
@@ -329,14 +349,51 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                     onManualMerchantChange = { manualMerchant = it },
                     onManualCategoryChange = { manualCategory = it },
                     onAddCategoryOption = vm::addCustomCategory,
+                    onRemoveCategoryOption = vm::removeCustomCategory,
                     onToggleCategoryPin = vm::togglePinnedCategory,
                     onSaveManual = {
-                        vm.addManualEntry(manualType, manualAmount, manualDesc, manualMerchant, manualCategory, manualKind)
-                        if (manualAmount.isNotBlank() && manualDesc.isNotBlank()) {
-                            manualAmount = ""
-                            manualDesc = ""
-                            manualMerchant = ""
-                            manualKindName = SpendingKind.NORMAL.name
+                        val normalizedAmount = manualAmount.filter(Char::isDigit).toLongOrNull()
+                        when {
+                            normalizedAmount == null -> {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        message = "금액을 숫자로 입력해 주세요.",
+                                        duration = SnackbarDuration.Short
+                                    )
+                                }
+                            }
+                            normalizedAmount <= 0L -> {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        message = "금액은 1원 이상이어야 합니다.",
+                                        duration = SnackbarDuration.Short
+                                    )
+                                }
+                            }
+                            manualDesc.isBlank() -> {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        message = "거래 내용을 입력해 주세요.",
+                                        duration = SnackbarDuration.Short
+                                    )
+                                }
+                            }
+                            manualCategory.isBlank() -> {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        message = "카테고리를 먼저 선택하거나 추가해 주세요.",
+                                        duration = SnackbarDuration.Short
+                                    )
+                                }
+                            }
+                            else -> {
+                                vm.addManualEntry(manualType, manualAmount, manualDesc, manualMerchant, manualCategory, manualKind)
+                                manualSaveSignal++
+                                manualAmount = ""
+                                manualDesc = ""
+                                manualMerchant = ""
+                                manualKindName = SpendingKind.NORMAL.name
+                            }
                         }
                     },
                     onLoadManualFromEntry = { entry ->
@@ -393,6 +450,8 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                     },
                     onOpenSettings = { openNotificationListenerSettings(context) },
                     onRefreshNotification = vm::refreshNotificationAccess,
+                    onToggleNotificationSource = vm::setNotificationSourceEnabled,
+                    onToggleAllNotificationSources = vm::setAllNotificationSourceEnabled,
                     onInjectExpenseNotification = {
                         vm.injectTestNotification(HomeViewModel.NotificationTestPreset.EXPENSE_CARD)
                     },
@@ -420,6 +479,9 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                     },
                     onSetTotalBudget = vm::setTotalBudget,
                     onCloseMonth = vm::closeCurrentMonth,
+                    onClearAllRecords = vm::clearAllRecords,
+                    onClearRecordsByPeriod = vm::clearRecordsByPeriod,
+                    onFactoryReset = vm::clearFactoryData,
                     onSaveRule = vm::saveClassificationRule,
                     onSaveNaturalRule = vm::saveNaturalLanguageRule,
                     onRemoveRule = vm::removeClassificationRule,
@@ -495,6 +557,13 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                         onValueChange = { editCategory = it },
                         options = state.categoryOptions,
                         onAddCategory = vm::addCustomCategory,
+                        onDeleteCategory = { removed ->
+                            vm.removeCustomCategory(removed)
+                            if (editCategory == removed) {
+                                editCategory = ""
+                            }
+                        },
+                        deletableCategoryOptions = state.customCategories,
                         label = "카테고리"
                     )
                 }

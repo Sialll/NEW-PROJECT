@@ -133,6 +133,12 @@ data class MonthlyClosing(
     val closedAtMillis: Long?
 )
 
+data class CalendarMemo(
+    val date: LocalDate,
+    val text: String,
+    val updatedAtMillis: Long
+)
+
 data class ClassificationRule(
     val id: String = UUID.randomUUID().toString(),
     val keyword: String,

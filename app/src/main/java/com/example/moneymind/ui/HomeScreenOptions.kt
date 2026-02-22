@@ -105,6 +105,8 @@ internal fun OptionsPage(
     onExportAnalysis: () -> Unit,
     onOpenSettings: () -> Unit,
     onRefreshNotification: () -> Unit,
+    onToggleNotificationSource: (String, Boolean) -> Unit,
+    onToggleAllNotificationSources: (Boolean) -> Unit,
     onInjectExpenseNotification: () -> Unit,
     onInjectIncomeNotification: () -> Unit,
     onInjectLoanNotification: () -> Unit,
@@ -115,6 +117,9 @@ internal fun OptionsPage(
     onSaveInstallment: () -> Unit,
     onSetTotalBudget: (String) -> Unit,
     onCloseMonth: (String) -> Unit,
+    onClearAllRecords: () -> Unit,
+    onClearRecordsByPeriod: (String, String) -> Unit,
+    onFactoryReset: () -> Unit,
     onSaveRule: (String, SpendingKind, String) -> Unit,
     onSaveNaturalRule: (String) -> Unit,
     onRemoveRule: (String) -> Unit,
@@ -172,6 +177,13 @@ internal fun OptionsPage(
                     )
                 }
                 item {
+                    NotificationSourceFilterCard(
+                        state = state,
+                        onToggleSource = onToggleNotificationSource,
+                        onToggleAllSources = onToggleAllNotificationSources
+                    )
+                }
+                item {
                     FileOptionSection(
                         onImport = onImport,
                         onExportBank = onExportBank,
@@ -204,6 +216,9 @@ internal fun OptionsPage(
                         state = state,
                         onSetTotalBudget = onSetTotalBudget,
                         onCloseMonth = onCloseMonth,
+                        onClearAllRecords = onClearAllRecords,
+                        onClearRecordsByPeriod = onClearRecordsByPeriod,
+                        onFactoryReset = onFactoryReset,
                         onSaveRule = onSaveRule,
                         onSaveNaturalRule = onSaveNaturalRule,
                         onRemoveRule = onRemoveRule,
@@ -276,6 +291,10 @@ private fun FileOptionSection(
 @Composable
 internal fun ManualEntrySection(
     state: HomeUiState,
+    manualCategorySeedOptions: List<String>,
+    onManualCategoryChange: (String) -> Unit,
+    onAddCategoryOption: (String) -> Unit,
+    onRemoveCategoryOption: (String) -> Unit,
     manualType: EntryType,
     manualKind: SpendingKind,
     amount: String,
@@ -306,11 +325,11 @@ internal fun ManualEntrySection(
                 Text("수동 입력", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(EntryType.EXPENSE, EntryType.INCOME).forEach { type ->
+                    listOf(EntryType.EXPENSE, EntryType.INCOME, EntryType.TRANSFER).forEach { type ->
                         FilterChip(
                             selected = manualType == type,
                             onClick = { onTypeChange(type) },
-                            label = { Text(if (type == EntryType.EXPENSE) "소비" else "수입") }
+                            label = { Text(entryTypeLabel(type)) }
                         )
                     }
                 }
@@ -331,6 +350,44 @@ internal fun ManualEntrySection(
                         }
                     }
                 }
+
+                val normalizedManualCategory = category.trim()
+                val allManualCategoryOptions = remember(
+                    state.categoryOptions,
+                    manualCategorySeedOptions,
+                    normalizedManualCategory
+                ) {
+                    (state.categoryOptions + manualCategorySeedOptions + normalizedManualCategory)
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                        .sorted()
+                }
+
+                SupportingText(
+                    if (category.isBlank()) {
+                        "카테고리를 선택하면 수동 입력 저장 시 바로 반영됩니다."
+                    } else {
+                        "선택된 카테고리: $category"
+                    }
+                )
+                CategorySelectField(
+                    value = category,
+                    options = allManualCategoryOptions,
+                    onValueChange = onManualCategoryChange,
+                    onAddCategory = { newCategory ->
+                        onAddCategoryOption(newCategory)
+                        onManualCategoryChange(newCategory)
+                    },
+                    onDeleteCategory = { removed ->
+                        if (category == removed) {
+                            onManualCategoryChange("")
+                        }
+                        onRemoveCategoryOption(removed)
+                    },
+                    deletableCategoryOptions = state.customCategories,
+                    label = "카테고리 선택"
+                )
 
                 CleanField(
                     value = amount,
@@ -378,13 +435,6 @@ internal fun ManualEntrySection(
                     value = merchant,
                     onValueChange = onMerchantChange,
                     label = "가맹점/거래처 (선택)"
-                )
-                SupportingText(
-                    if (category.isBlank()) {
-                        "카테고리: 가계부 상단에서 선택해 주세요"
-                    } else {
-                        "카테고리: $category"
-                    }
                 )
 
                 Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
@@ -554,6 +604,9 @@ private fun ControlOptionSection(
     state: HomeUiState,
     onSetTotalBudget: (String) -> Unit,
     onCloseMonth: (String) -> Unit,
+    onClearAllRecords: () -> Unit,
+    onClearRecordsByPeriod: (String, String) -> Unit,
+    onFactoryReset: () -> Unit,
     onSaveRule: (String, SpendingKind, String) -> Unit,
     onSaveNaturalRule: (String) -> Unit,
     onRemoveRule: (String) -> Unit,
@@ -564,6 +617,11 @@ private fun ControlOptionSection(
     var ruleKeywordInput by rememberSaveable { mutableStateOf("") }
     var ruleCategoryInput by rememberSaveable { mutableStateOf("") }
     var naturalRuleInput by rememberSaveable { mutableStateOf("") }
+    var resetStartDateInput by rememberSaveable { mutableStateOf("") }
+    var resetEndDateInput by rememberSaveable { mutableStateOf("") }
+    var showClearAllConfirm by rememberSaveable { mutableStateOf(false) }
+    var showClearPeriodConfirm by rememberSaveable { mutableStateOf(false) }
+    var showFactoryResetConfirm by rememberSaveable { mutableStateOf(false) }
     var ruleKindName by rememberSaveable { mutableStateOf(SpendingKind.SUBSCRIPTION.name) }
     val ruleKind = runCatching { SpendingKind.valueOf(ruleKindName) }.getOrDefault(SpendingKind.SUBSCRIPTION)
 
@@ -629,6 +687,55 @@ private fun ControlOptionSection(
                 )
                 Button(onClick = { onCloseMonth(closingActualInput) }) {
                     Text("이번 달 마감 저장")
+                }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF4F4)),
+            border = BorderStroke(1.dp, Color(0xFFFDA4AF))
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("기록 초기화", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "거래 기록/달력 메모/월말 마감 기록을 삭제합니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF7F1D1D)
+                )
+
+                Button(
+                    onClick = { showClearAllConfirm = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("전체 기록 초기화")
+                }
+
+                CleanField(
+                    value = resetStartDateInput,
+                    onValueChange = { resetStartDateInput = it.trim() },
+                    label = "시작일 (YYYY-MM-DD, 비워두면 전체 기간)"
+                )
+                CleanField(
+                    value = resetEndDateInput,
+                    onValueChange = { resetEndDateInput = it.trim() },
+                    label = "종료일 (YYYY-MM-DD, 비워두면 전체 기간)"
+                )
+                Button(
+                    onClick = { showClearPeriodConfirm = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("기간 기록 초기화")
+                }
+
+                Button(
+                    onClick = { showFactoryResetConfirm = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("공장초기화 (모든 설정 포함)")
                 }
             }
         }
@@ -761,6 +868,74 @@ private fun ControlOptionSection(
             }
         }
     }
+
+    if (showClearAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearAllConfirm = false },
+            title = { Text("전체 기록 초기화") },
+            text = { Text("모든 거래 기록/달력 메모/월말 마감 기록을 삭제합니다. 계속할까요?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onClearAllRecords()
+                        showClearAllConfirm = false
+                    }
+                ) { Text("삭제") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearAllConfirm = false }) { Text("취소") }
+            }
+        )
+    }
+
+    if (showClearPeriodConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearPeriodConfirm = false },
+            title = { Text("기간 기록 초기화") },
+            text = {
+                Text(
+                    "선택 기간의 거래 기록/달력 메모/월말 마감 기록을 삭제합니다.\n" +
+                        "시작/종료 값이 비어 있으면 해당 방향 끝까지 적용됩니다.\n" +
+                        "기간: ${resetStartDateInput.ifBlank { "(미입력)" }} ~ ${resetEndDateInput.ifBlank { "(미입력)" }}"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onClearRecordsByPeriod(resetStartDateInput, resetEndDateInput)
+                        showClearPeriodConfirm = false
+                    },
+                    enabled = resetStartDateInput.isNotBlank() || resetEndDateInput.isNotBlank()
+                ) { Text("삭제") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearPeriodConfirm = false }) { Text("취소") }
+            }
+        )
+    }
+
+    if (showFactoryResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showFactoryResetConfirm = false },
+            title = { Text("공장초기화") },
+            text = {
+                Text(
+                    "거래/메모/마감뿐 아니라 카테고리, 룰, 템플릿, 예산, 등록 정보, 알림 필터까지 모두 삭제합니다."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onFactoryReset()
+                        showFactoryResetConfirm = false
+                    }
+                ) { Text("초기화") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFactoryResetConfirm = false }) { Text("취소") }
+            }
+        )
+    }
 }
 
 private fun spendingKindLabel(kind: SpendingKind): String {
@@ -777,6 +952,111 @@ private fun entryTypeLabel(type: EntryType): String {
         EntryType.EXPENSE -> "소비"
         EntryType.INCOME -> "수입"
         EntryType.TRANSFER -> "이체"
+    }
+}
+
+@Composable
+private fun NotificationSourceFilterCard(
+    state: HomeUiState,
+    onToggleSource: (String, Boolean) -> Unit,
+    onToggleAllSources: (Boolean) -> Unit
+) {
+    if (!state.notificationCaptureSupported) return
+
+    val installedCount = state.notificationSourceOptions.count { it.installed }
+    val enabledCount = state.notificationSourceOptions.count { it.installed && it.enabled }
+    val totalCount = state.notificationSourceOptions.size
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("알림 수집 앱 필터", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = false,
+                    onClick = {},
+                    enabled = false,
+                    label = { Text("전체 ${totalCount}개") }
+                )
+                FilterChip(
+                    selected = enabledCount > 0,
+                    onClick = { onToggleAllSources(true) },
+                    enabled = installedCount > 0 && enabledCount < installedCount,
+                    label = { Text("선택됨 ${enabledCount}개") }
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = {},
+                    enabled = false,
+                    label = { Text("설치됨 ${installedCount}개") }
+                )
+            }
+            if (installedCount == 0) {
+                Text(
+                    "지금 설치된 앱이 없어서 필터를 구성할 수 없습니다. 앱 탭에서 은행 앱을 설치하세요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFB45309)
+                )
+            } else if (enabledCount == 0) {
+                Text(
+                    "현재 알림 수집이 비활성 상태입니다. 최소 1개 앱을 선택하면 자동 수집이 시작됩니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFB45309)
+                )
+            } else {
+                Text(
+                    "선택한 앱의 알림만 수집됩니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF64748B)
+                )
+            }
+            if (installedCount > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(onClick = { onToggleAllSources(true) }) {
+                        Text("전체 선택")
+                    }
+                    TextButton(onClick = { onToggleAllSources(false) }) {
+                        Text("전체 해제")
+                    }
+                }
+            }
+
+            if (state.notificationSourceOptions.isEmpty()) {
+                Text(
+                    "지원되는 금융 앱 목록을 불러오는 중입니다.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                state.notificationSourceOptions.forEach { source ->
+                    val statusSuffix = if (source.installed) "" else " (미설치)"
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "${source.label}$statusSuffix",
+                            color = if (source.installed) MaterialTheme.colorScheme.onSurface else Color(0xFF94A3B8)
+                        )
+                        Checkbox(
+                            checked = source.enabled,
+                            enabled = source.installed,
+                            onCheckedChange = { checked ->
+                                onToggleSource(source.packageName, checked)
+                            }
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

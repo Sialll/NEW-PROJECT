@@ -19,4 +19,7 @@ interface ClassificationRuleDao {
 
     @Query("DELETE FROM classification_rules WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM classification_rules")
+    suspend fun deleteAll()
 }

@@ -16,4 +16,7 @@ interface OwnedAccountDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: OwnedAccountEntity)
+
+    @Query("DELETE FROM owned_accounts")
+    suspend fun deleteAll()
 }

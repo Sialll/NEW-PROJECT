@@ -16,9 +16,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         QuickTemplateEntity::class,
         BudgetTargetEntity::class,
         MonthlyClosingEntity::class,
-        ClassificationRuleEntity::class
+        ClassificationRuleEntity::class,
+        CalendarMemoEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class MoneyMindDatabase : RoomDatabase() {
@@ -30,6 +31,7 @@ abstract class MoneyMindDatabase : RoomDatabase() {
     abstract fun budgetTargetDao(): BudgetTargetDao
     abstract fun monthlyClosingDao(): MonthlyClosingDao
     abstract fun classificationRuleDao(): ClassificationRuleDao
+    abstract fun calendarMemoDao(): CalendarMemoDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -164,6 +166,21 @@ abstract class MoneyMindDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS calendar_memos (
+                        date TEXT NOT NULL,
+                        memo TEXT NOT NULL,
+                        updatedAtMillis INTEGER NOT NULL,
+                        PRIMARY KEY(date)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         @Volatile
         private var instance: MoneyMindDatabase? = null
 
@@ -177,6 +194,7 @@ abstract class MoneyMindDatabase : RoomDatabase() {
                     .addMigrations(MIGRATION_1_2)
                     .addMigrations(MIGRATION_2_3)
                     .addMigrations(MIGRATION_3_4)
+                    .addMigrations(MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }

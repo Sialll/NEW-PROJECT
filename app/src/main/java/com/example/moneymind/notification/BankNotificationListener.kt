@@ -1,18 +1,21 @@
-﻿package com.example.moneymind.notification
+package com.example.moneymind.notification
 
+import com.example.moneymind.BuildConfig
+import com.example.moneymind.core.ServiceLocator
 import android.app.Notification
 import android.content.ComponentName
 import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import com.example.moneymind.core.ServiceLocator
-import java.util.LinkedHashMap
+import android.util.Log
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+
+private const val TAG = "MM.NotificationListener"
 
 class BankNotificationListener : NotificationListenerService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -34,10 +37,21 @@ class BankNotificationListener : NotificationListenerService() {
             ?: extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
 
-        if (!NotificationSourcePolicy.isSupported(sourcePackage, title, text)) return
-        if (!shouldIngest(sourcePackage, sbn.postTime, title, text)) return
+        if (!NotificationSourcePolicy.isSupported(applicationContext, sourcePackage, title, text)) {
+            logDebug("Notification filtered: package=$sourcePackage")
+            return
+        }
+        if (!shouldIngest(sourcePackage, sbn.postTime, title, text)) {
+            logDebug("Notification deduped: package=$sourcePackage")
+            return
+        }
 
-        val parsed = NotificationMessageParser.parse(title, text) ?: return
+        val parsed = NotificationMessageParser.parse(title, text) ?: run {
+            logDebug("Notification parse failed: package=$sourcePackage")
+            return
+        }
+
+        logDebug("Notification ingested: package=$sourcePackage amount=${parsed.signedAmount}")
         serviceScope.launch {
             ServiceLocator.repository(applicationContext).ingestNotification(parsed)
         }
@@ -78,6 +92,12 @@ class BankNotificationListener : NotificationListenerService() {
             }
             recentNotificationCache[identity] = minEventTime
             return true
+        }
+    }
+
+    private fun logDebug(message: String) {
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, message)
         }
     }
 

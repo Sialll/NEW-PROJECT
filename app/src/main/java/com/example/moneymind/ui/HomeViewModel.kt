@@ -13,6 +13,7 @@ import com.example.moneymind.BuildConfig
 import com.example.moneymind.core.ServiceLocator
 import com.example.moneymind.data.repo.LedgerRepository
 import com.example.moneymind.domain.BudgetTarget
+import com.example.moneymind.domain.CalendarMemo
 import com.example.moneymind.domain.ClassificationRule
 import com.example.moneymind.domain.EntrySource
 import com.example.moneymind.domain.EntryType
@@ -31,6 +32,7 @@ import com.example.moneymind.importer.StatementImporter
 import com.example.moneymind.notification.BankNotificationListener
 import com.example.moneymind.notification.NotificationAccessHelper
 import com.example.moneymind.notification.NotificationMessageParser
+import com.example.moneymind.notification.NotificationSourcePrefs
 import com.example.moneymind.notification.NotificationSourcePolicy
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -87,6 +89,13 @@ data class AdvancedReport(
     val topCategoryTrends: List<CategoryTrend> = emptyList()
 )
 
+data class NotificationSourceOption(
+    val packageName: String,
+    val label: String,
+    val installed: Boolean,
+    val enabled: Boolean
+)
+
 data class HomeUiState(
     val ownerAliases: Set<String> = emptySet(),
     val accounts: List<OwnedAccount> = emptyList(),
@@ -94,6 +103,7 @@ data class HomeUiState(
     val quickTemplates: List<QuickTemplate> = emptyList(),
     val budgetTargets: List<BudgetTarget> = emptyList(),
     val monthlyClosings: List<MonthlyClosing> = emptyList(),
+    val calendarMemos: List<CalendarMemo> = emptyList(),
     val classificationRules: List<ClassificationRule> = emptyList(),
     val categoryOptions: List<String> = defaultCategoryOptions,
     val pinnedCategories: Set<String> = emptySet(),
@@ -110,12 +120,15 @@ data class HomeUiState(
     val budgetProgress: BudgetProgress = BudgetProgress(),
     val closingPreview: ClosingPreview = ClosingPreview(),
     val report: AdvancedReport = AdvancedReport(),
+    val customCategories: Set<String> = emptySet(),
+    val notificationSourceOptions: List<NotificationSourceOption> = emptyList(),
     val warnings: List<String> = emptyList(),
     val encryptionEnabled: Boolean = true,
     val notificationCaptureSupported: Boolean = BuildConfig.NOTIFICATION_CAPTURE_ENABLED,
     val notificationAccessEnabled: Boolean = false,
     val smsPermissionGranted: Boolean = false,
-    val lastError: String? = null
+    val lastError: String? = null,
+    val lastInfo: String? = null
 ) {
     companion object {
         val defaultCategoryOptions = emptyList<String>()
@@ -135,6 +148,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         refreshNotificationAccess()
+        refreshNotificationSourceOptions()
         refreshSmsPermissionAccess()
         bootstrapRecurringEntries()
         observePersistedState()
@@ -211,6 +225,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 val amount = amountText.filter(Char::isDigit).toLongOrNull()
                     ?: error("금액을 숫자로 입력해 주세요.")
+                if (amount <= 0L) {
+                    error("금액은 1원 이상이어야 합니다.")
+                }
                 val normalizedDescription = description.trim()
                 if (normalizedDescription.isBlank()) {
                     error("거래 내용을 입력해 주세요.")
@@ -223,7 +240,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     error("카테고리를 먼저 선택하거나 추가해 주세요.")
                 }
 
-                repository.addManualEntry(
+                val saved = repository.addManualEntry(
                     LedgerEntry(
                         occurredAt = LocalDateTime.now(),
                         amount = amount,
@@ -235,8 +252,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         spendingKind = resolvedKind
                     )
                 )
+                if (!saved) {
+                    error("수동 입력 저장에 실패했습니다.")
+                }
             }.onSuccess {
-                _uiState.update { it.copy(lastError = null) }
+                _uiState.update {
+                    it.copy(
+                        lastError = null,
+                        lastInfo = "수동 입력이 저장되었습니다."
+                    )
+                }
             }.onFailure { error ->
                 _uiState.update { it.copy(lastError = error.message ?: "수동 입력 저장 실패") }
             }
@@ -256,6 +281,25 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 .map { it.trim() }
                 .filter { it.isNotBlank() }
                 .distinct()
+                .sorted()
+            state.copy(categoryOptions = merged)
+        }
+    }
+
+    fun removeCustomCategory(category: String) {
+        val normalized = category.trim()
+        if (normalized.isBlank()) return
+
+        val current = customCategories.value
+        if (normalized !in current) return
+
+        val updated = current - normalized
+        customCategories.value = updated
+        prefs.edit().putStringSet(PREF_CUSTOM_CATEGORIES, updated).apply()
+
+        _uiState.update { state ->
+            val merged = state.categoryOptions
+                .filter { it != normalized }
                 .sorted()
             state.copy(categoryOptions = merged)
         }
@@ -404,6 +448,30 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun upsertCalendarMemo(date: LocalDate, memo: String) {
+        viewModelScope.launch {
+            runCatching {
+                repository.upsertCalendarMemo(date, memo)
+            }.onSuccess {
+                _uiState.update { it.copy(lastError = null) }
+            }.onFailure { error ->
+                _uiState.update { it.copy(lastError = error.message ?: "메모 저장 실패") }
+            }
+        }
+    }
+
+    fun deleteCalendarMemo(date: LocalDate) {
+        viewModelScope.launch {
+            runCatching {
+                repository.deleteCalendarMemo(date)
+            }.onSuccess {
+                _uiState.update { it.copy(lastError = null) }
+            }.onFailure { error ->
+                _uiState.update { it.copy(lastError = error.message ?: "메모 삭제 실패") }
+            }
+        }
+    }
+
     fun saveClassificationRule(keyword: String, spendingKind: SpendingKind, category: String) {
         viewModelScope.launch {
             runCatching {
@@ -481,6 +549,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 if (normalizedDescription.isBlank()) {
                     error("거래 내용을 입력해 주세요.")
                 }
+                val targetEntry = _uiState.value.entries.firstOrNull { it.id == entryId }
+                    ?: error("수정할 항목을 찾지 못했습니다.")
 
                 repository.updateEntry(
                     entryId = entryId,
@@ -489,6 +559,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     description = normalizedDescription,
                     merchant = merchant,
                     category = category,
+                    occurredAt = targetEntry.occurredAt,
                     spendingKind = spendingKind
                 )
             }.onSuccess {
@@ -511,11 +582,74 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun clearAllRecords() {
+        viewModelScope.launch {
+            runCatching {
+                repository.clearAllRecords()
+            }.onSuccess {
+                _uiState.update { it.copy(lastError = null, lastInfo = "전체 기록 초기화가 완료되었습니다.") }
+            }.onFailure { error ->
+                _uiState.update { it.copy(lastError = error.message ?: "전체 기록 초기화 실패", lastInfo = null) }
+            }
+        }
+    }
+
+    fun clearRecordsByPeriod(startDateText: String, endDateText: String) {
+        viewModelScope.launch {
+            runCatching {
+                val startDate = parseResetDateOrDefault(startDateText, default = MIN_RESET_DATE)
+                val endDate = parseResetDateOrDefault(endDateText, default = MAX_RESET_DATE)
+                if (startDateText.isBlank() && endDateText.isBlank()) {
+                    error("기간 삭제는 시작일 또는 종료일 중 하나를 입력해 주세요.")
+                }
+                if (endDate.isBefore(startDate)) {
+                    error("종료일은 시작일보다 같거나 이후여야 합니다.")
+                }
+                repository.clearRecordsByPeriod(startDate, endDate)
+            }.onSuccess {
+                val startText = startDateText.ifBlank { MIN_RESET_DATE.toString() }
+                val endText = endDateText.ifBlank { MAX_RESET_DATE.toString() }
+                _uiState.update { it.copy(lastError = null, lastInfo = "기간 기록 초기화 완료: $startText ~ $endText") }
+            }.onFailure { error ->
+                _uiState.update { it.copy(lastError = error.message ?: "기간 기록 초기화 실패", lastInfo = null) }
+            }
+        }
+    }
+
+    fun clearFactoryData() {
+        viewModelScope.launch {
+            runCatching {
+                repository.clearFactoryData()
+                prefs.edit().clear().apply()
+                customCategories.value = emptySet()
+                pinnedCategories.value = emptySet()
+                refreshNotificationSourceOptions()
+            }.onSuccess {
+                _uiState.update { it.copy(lastError = null, lastInfo = "공장초기화가 완료되었습니다.") }
+            }.onFailure { error ->
+                _uiState.update { it.copy(lastError = error.message ?: "공장초기화 실패", lastInfo = null) }
+            }
+        }
+    }
+
+    fun clearInfoMessage() {
+        _uiState.update { it.copy(lastInfo = null) }
+    }
+
+    fun clearErrorMessage() {
+        _uiState.update { it.copy(lastError = null) }
+    }
+
     fun injectTestNotification(preset: NotificationTestPreset) {
         viewModelScope.launch {
             runCatching {
                 val payload = preset.toPayload()
-                if (!NotificationSourcePolicy.isSupported(payload.packageName, payload.title, payload.text)) {
+                val context = getApplication<Application>().applicationContext
+                if (!NotificationSourcePolicy.isSupported(context, payload.packageName, payload.title, payload.text)) {
+                    val hasFilter = NotificationSourcePrefs.hasSavedFilter(context)
+                    if (hasFilter && NotificationSourcePrefs.loadAllowedPackages(context).isEmpty()) {
+                        error("알림 수집 대상 앱이 설정되어 있지 않아 테스트 수집이 차단됩니다. 대상 앱을 최소 1개 이상 선택해 주세요.")
+                    }
                     error("테스트 알림이 지원 소스로 인식되지 않았습니다.")
                 }
                 val parsed = NotificationMessageParser.parse(payload.title, payload.text)
@@ -584,6 +718,141 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 notificationAccessEnabled = accessEnabled
             )
         }
+        refreshNotificationSourceOptions()
+    }
+
+    fun setNotificationSourceEnabled(packageName: String, enabled: Boolean) {
+        val normalized = packageName.trim().lowercase()
+        if (normalized.isBlank()) return
+        val context = getApplication<Application>().applicationContext
+        val currentOptions = _uiState.value.notificationSourceOptions
+        val target = currentOptions.firstOrNull { option ->
+            option.packageName == normalized && option.installed
+        }
+        if (target == null) {
+            _uiState.update {
+                it.copy(lastError = "알림 수집 대상 앱을 찾을 수 없습니다: $normalized")
+            }
+            return
+        }
+
+        val updatedOptions = currentOptions.map { option ->
+            if (option.packageName == target.packageName) {
+                option.copy(enabled = enabled)
+            } else {
+                option
+            }
+        }
+
+        val selectedPackages = updatedOptions
+            .asSequence()
+            .filter { it.installed && it.enabled }
+            .map { it.packageName }
+            .toSet()
+
+        NotificationSourcePrefs.saveAllowedPackages(context, selectedPackages)
+        val selectedCount = selectedPackages.size
+        val action = if (enabled) "선택" else "해제"
+        _uiState.update {
+            it.copy(
+                notificationSourceOptions = updatedOptions,
+                lastError = null,
+                lastInfo = "${target.label} 알림 수집을 ${action}했습니다. (총 ${selectedCount}개 선택)"
+            )
+        }
+
+        if (_uiState.value.notificationAccessEnabled) {
+            BankNotificationListener.requestRebindSafely(context)
+        }
+    }
+
+    fun setAllNotificationSourceEnabled(enabled: Boolean) {
+        val context = getApplication<Application>().applicationContext
+        val currentOptions = _uiState.value.notificationSourceOptions
+        val target = currentOptions
+            .filter { it.installed }
+            .map { it.packageName }
+            .toSet()
+
+        if (target.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    lastError = "설치된 수집 대상 앱이 없습니다. 앱 목록을 확인해 주세요.",
+                    lastInfo = null
+                )
+            }
+            return
+        }
+
+        val allowed = if (enabled) {
+            target
+        } else {
+            emptySet()
+        }
+
+        val updatedOptions = currentOptions.map { option ->
+            option.copy(enabled = option.installed && enabled)
+        }
+        NotificationSourcePrefs.saveAllowedPackages(context, allowed)
+        _uiState.update {
+            it.copy(
+                notificationSourceOptions = updatedOptions,
+                lastError = null,
+                lastInfo = if (enabled) "모든 수집 대상 앱을 선택했습니다." else "수집 대상 앱을 모두 해제했습니다."
+            )
+        }
+
+        if (_uiState.value.notificationAccessEnabled) {
+            BankNotificationListener.requestRebindSafely(context)
+        }
+    }
+
+    fun refreshNotificationSourceOptions() {
+        val context = getApplication<Application>().applicationContext
+        if (!BuildConfig.NOTIFICATION_CAPTURE_ENABLED) {
+            _uiState.update { it.copy(notificationSourceOptions = emptyList()) }
+            return
+        }
+
+        val packageManager = context.packageManager
+        val supported = NotificationSourcePolicy.supportedApps()
+        val installedPackageSet = supported
+            .asSequence()
+            .map { it.packageName }
+            .filter { packageName -> isPackageInstalled(packageManager, packageName) }
+            .toSet()
+            .map { it.lowercase() }
+            .toSet()
+
+        val hasSavedFilter = NotificationSourcePrefs.hasSavedFilter(context)
+        if (!hasSavedFilter) {
+            NotificationSourcePrefs.saveAllowedPackages(context, emptySet())
+        }
+
+        val supportedPackageSet = NotificationSourcePolicy.supportedPackageNames()
+        val savedAllowed = NotificationSourcePrefs.loadAllowedPackages(context)
+        var allowed = savedAllowed
+            .filter { it in supportedPackageSet }
+            .toSet()
+            .toMutableSet()
+
+        if (!hasSavedFilter) {
+            allowed = allowed.intersect(installedPackageSet).toMutableSet()
+        }
+        if (allowed != savedAllowed) {
+            NotificationSourcePrefs.saveAllowedPackages(context, allowed)
+        }
+
+        val options = supported.map { source ->
+            NotificationSourceOption(
+                packageName = source.packageName,
+                label = source.label,
+                installed = source.packageName in installedPackageSet,
+                enabled = source.packageName in allowed && source.packageName in installedPackageSet
+            )
+        }
+
+        _uiState.update { it.copy(notificationSourceOptions = options) }
     }
 
     fun refreshSmsPermissionAccess() {
@@ -623,16 +892,27 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     },
                     combine(
-                        repository.quickTemplatesFlow,
-                        repository.budgetTargetsFlow,
-                        repository.monthlyClosingsFlow,
-                        repository.classificationRulesFlow
-                    ) { templates, budgets, closings, rules ->
+                        combine(
+                            repository.quickTemplatesFlow,
+                            repository.budgetTargetsFlow,
+                            repository.monthlyClosingsFlow,
+                            repository.classificationRulesFlow
+                        ) { templates, budgets, closings, rules ->
+                            BasicExtendedPersistedState(
+                                templates = templates,
+                                budgets = budgets,
+                                closings = closings,
+                                rules = rules
+                            )
+                        },
+                        repository.calendarMemosFlow
+                    ) { basicExtended, memos ->
                         ExtendedPersistedState(
-                            templates = templates,
-                            budgets = budgets,
-                            closings = closings,
-                            rules = rules
+                            templates = basicExtended.templates,
+                            budgets = basicExtended.budgets,
+                            closings = basicExtended.closings,
+                            rules = basicExtended.rules,
+                            memos = memos
                         )
                     }
                 ) { core, extended ->
@@ -644,7 +924,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         templates = extended.templates,
                         budgets = extended.budgets,
                         closings = extended.closings,
-                        rules = extended.rules
+                        rules = extended.rules,
+                        memos = extended.memos
                     )
                 },
                 customCategories,
@@ -674,7 +955,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         quickTemplates = persisted.templates,
                         budgetTargets = persisted.budgets,
                         monthlyClosings = persisted.closings,
+                        calendarMemos = persisted.memos,
                         classificationRules = persisted.rules,
+                        customCategories = customCategorySet,
                         categoryOptions = categoryOptions,
                         pinnedCategories = pinnedCategorySet,
                         reviewCandidates = reviewCandidates,
@@ -963,6 +1246,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun monthToOrder(month: YearMonth): Int = month.year * 12 + month.monthValue
 
+    private fun parseResetDateOrDefault(text: String, default: LocalDate): LocalDate {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return default
+        return runCatching { LocalDate.parse(trimmed) }
+            .getOrElse { error("날짜 형식이 올바르지 않습니다. 예: 2026-02-01") }
+    }
+
+    private fun isPackageInstalled(
+        packageManager: PackageManager,
+        packageName: String
+    ): Boolean {
+        return runCatching {
+            packageManager.getApplicationInfo(packageName, 0)
+            true
+        }.getOrElse { false }
+    }
+
     private fun NotificationTestPreset.toPayload(): TestNotificationPayload {
         return when (this) {
             NotificationTestPreset.EXPENSE_CARD -> TestNotificationPayload(
@@ -1002,11 +1302,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val plans: List<InstallmentPlan>
     )
 
-    private data class ExtendedPersistedState(
+    private data class BasicExtendedPersistedState(
         val templates: List<QuickTemplate>,
         val budgets: List<BudgetTarget>,
         val closings: List<MonthlyClosing>,
         val rules: List<ClassificationRule>
+    )
+
+    private data class ExtendedPersistedState(
+        val templates: List<QuickTemplate>,
+        val budgets: List<BudgetTarget>,
+        val closings: List<MonthlyClosing>,
+        val rules: List<ClassificationRule>,
+        val memos: List<CalendarMemo>
     )
 
     private data class PersistedState(
@@ -1017,7 +1325,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val templates: List<QuickTemplate>,
         val budgets: List<BudgetTarget>,
         val closings: List<MonthlyClosing>,
-        val rules: List<ClassificationRule>
+        val rules: List<ClassificationRule>,
+        val memos: List<CalendarMemo>
     )
 
     private data class ParsedNaturalRule(
@@ -1031,5 +1340,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         private const val PREFS_NAME = "moneymind_preferences"
         private const val PREF_CUSTOM_CATEGORIES = "custom_categories"
         private const val PREF_PINNED_CATEGORIES = "pinned_categories"
+
+        private val MIN_RESET_DATE: LocalDate = LocalDate.of(1970, 1, 1)
+        private val MAX_RESET_DATE: LocalDate = LocalDate.of(9999, 12, 31)
     }
 }

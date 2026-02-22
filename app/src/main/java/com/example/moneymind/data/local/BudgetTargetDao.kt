@@ -16,4 +16,7 @@ interface BudgetTargetDao {
 
     @Query("DELETE FROM budget_targets WHERE key = :key")
     suspend fun deleteByKey(key: String)
+
+    @Query("DELETE FROM budget_targets")
+    suspend fun deleteAll()
 }
