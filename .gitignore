@@ -20,3 +20,9 @@ PLAY_UPLOAD_KEY_INFO.txt
 *.sql
 hyundai_seed_preview.csv
 
+# Local scratch files
+moneymind-test.png
+window*.xml
+temp_parse.py
+phone-check/
+.vscode/
