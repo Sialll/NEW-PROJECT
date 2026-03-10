@@ -404,7 +404,6 @@ internal fun LedgerBackPage(
     manualMerchant: String,
     manualCategory: String,
     categoryOptions: List<String>,
-    manualSaveSignal: Long,
     pinnedCategories: Set<String>,
     onSelectDay: (Int) -> Unit,
     onToggleChecked: (String) -> Unit,
@@ -1417,4 +1416,3 @@ private fun inferPaymentMethod(entry: LedgerEntry): PaymentMethodFilter {
         else -> PaymentMethodFilter.OTHER
     }
 }
-

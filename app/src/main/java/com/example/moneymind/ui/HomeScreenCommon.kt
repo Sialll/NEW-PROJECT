@@ -72,6 +72,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -99,9 +100,13 @@ import kotlin.math.roundToInt
 internal fun TopNavButton(
     label: String,
     selected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    testTag: String? = null
 ) {
-    TextButton(onClick = onClick) {
+    TextButton(
+        onClick = onClick,
+        modifier = if (testTag != null) Modifier.testTag(testTag) else Modifier
+    ) {
         Text(
             text = label,
             color = if (selected) Color(0xFF2B436B) else Color(0xFF6B7280),
@@ -172,13 +177,14 @@ internal fun AmountValueText(
 
 @Composable
 internal fun CleanField(
+    modifier: Modifier = Modifier,
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
     keyboardType: KeyboardType = KeyboardType.Text
 ) {
     OutlinedTextField(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
@@ -199,7 +205,10 @@ internal fun CategorySelectField(
     onAddCategory: (String) -> Unit,
     onDeleteCategory: ((String) -> Unit)? = null,
     deletableCategoryOptions: Set<String> = emptySet(),
-    label: String = "Category"
+    label: String = "Category",
+    triggerTestTag: String? = null,
+    newCategoryInputTestTag: String? = null,
+    addCategoryButtonTestTag: String? = null
 ) {
     var pickerOpen by rememberSaveable { mutableStateOf(false) }
     var addMode by rememberSaveable { mutableStateOf(false) }
@@ -258,6 +267,7 @@ internal fun CategorySelectField(
                 modifier = Modifier
                     .matchParentSize()
                     .height(56.dp)
+                    .then(if (triggerTestTag != null) Modifier.testTag(triggerTestTag) else Modifier)
                     .clickable {
                         addMode = isAddFlowNeeded
                         pickerOpen = true
@@ -331,7 +341,15 @@ internal fun CategorySelectField(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 OutlinedTextField(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .then(
+                                            if (newCategoryInputTestTag != null) {
+                                                Modifier.testTag(newCategoryInputTestTag)
+                                            } else {
+                                                Modifier
+                                            }
+                                        ),
                                     value = newCategory,
                                     onValueChange = { newCategory = it.take(32) },
                                     label = { Text("New category") },
@@ -360,7 +378,12 @@ internal fun CategorySelectField(
                                             onValueChange(normalizedNewCategory)
                                             onDismissPicker()
                                         },
-                                        enabled = addModeSubmitEnabled
+                                        enabled = addModeSubmitEnabled,
+                                        modifier = if (addCategoryButtonTestTag != null) {
+                                            Modifier.testTag(addCategoryButtonTestTag)
+                                        } else {
+                                            Modifier
+                                        }
                                     ) {
                                         Text("Add")
                                     }
@@ -416,4 +439,3 @@ internal fun openNotificationListenerSettings(context: Context) {
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }
 }
-

@@ -68,6 +68,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -116,6 +117,8 @@ internal fun OptionsPage(
     onInstallmentMonthsChange: (String) -> Unit,
     onSaveInstallment: () -> Unit,
     onSetTotalBudget: (String) -> Unit,
+    onSetCategoryBudget: (String, String) -> Unit,
+    onRemoveCategoryBudget: (String) -> Unit,
     onCloseMonth: (String) -> Unit,
     onClearAllRecords: () -> Unit,
     onClearRecordsByPeriod: (String, String) -> Unit,
@@ -148,16 +151,19 @@ internal fun OptionsPage(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         FilterChip(
+                            modifier = Modifier.testTag("options_section_file"),
                             selected = optionSection == OptionSection.FILE,
                             onClick = { onOptionSectionChange(OptionSection.FILE) },
                             label = { Text("파일") }
                         )
                         FilterChip(
+                            modifier = Modifier.testTag("options_section_profile"),
                             selected = optionSection == OptionSection.PROFILE,
                             onClick = { onOptionSectionChange(OptionSection.PROFILE) },
                             label = { Text("등록 관리") }
                         )
                         FilterChip(
+                            modifier = Modifier.testTag("options_section_control"),
                             selected = optionSection == OptionSection.CONTROL,
                             onClick = { onOptionSectionChange(OptionSection.CONTROL) },
                             label = { Text("예산/분석") }
@@ -215,6 +221,8 @@ internal fun OptionsPage(
                     ControlOptionSection(
                         state = state,
                         onSetTotalBudget = onSetTotalBudget,
+                        onSetCategoryBudget = onSetCategoryBudget,
+                        onRemoveCategoryBudget = onRemoveCategoryBudget,
                         onCloseMonth = onCloseMonth,
                         onClearAllRecords = onClearAllRecords,
                         onClearRecordsByPeriod = onClearRecordsByPeriod,
@@ -603,6 +611,8 @@ private fun ProfileOptionSection(
 private fun ControlOptionSection(
     state: HomeUiState,
     onSetTotalBudget: (String) -> Unit,
+    onSetCategoryBudget: (String, String) -> Unit,
+    onRemoveCategoryBudget: (String) -> Unit,
     onCloseMonth: (String) -> Unit,
     onClearAllRecords: () -> Unit,
     onClearRecordsByPeriod: (String, String) -> Unit,
@@ -613,6 +623,8 @@ private fun ControlOptionSection(
     onCreateRuleFromEntry: (String, SpendingKind) -> Unit
 ) {
     var totalBudgetInput by rememberSaveable { mutableStateOf("") }
+    var categoryBudgetInput by rememberSaveable { mutableStateOf("") }
+    var selectedBudgetCategory by rememberSaveable { mutableStateOf("") }
     var closingActualInput by rememberSaveable { mutableStateOf("") }
     var ruleKeywordInput by rememberSaveable { mutableStateOf("") }
     var ruleCategoryInput by rememberSaveable { mutableStateOf("") }
@@ -624,6 +636,17 @@ private fun ControlOptionSection(
     var showFactoryResetConfirm by rememberSaveable { mutableStateOf(false) }
     var ruleKindName by rememberSaveable { mutableStateOf(SpendingKind.SUBSCRIPTION.name) }
     val ruleKind = runCatching { SpendingKind.valueOf(ruleKindName) }.getOrDefault(SpendingKind.SUBSCRIPTION)
+    val categoryBudgetOptions = remember(
+        state.categoryOptions,
+        state.budgetProgress.categoryProgress,
+        selectedBudgetCategory
+    ) {
+        (state.categoryOptions + state.budgetProgress.categoryProgress.map { it.category } + selectedBudgetCategory)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card(
@@ -649,6 +672,54 @@ private fun ControlOptionSection(
                     Text("총 예산 저장")
                 }
 
+                CategorySelectField(
+                    value = selectedBudgetCategory,
+                    options = categoryBudgetOptions,
+                    onValueChange = { selectedBudgetCategory = it },
+                    onAddCategory = { selectedBudgetCategory = it },
+                    label = "카테고리 예산 대상",
+                    triggerTestTag = "options_budget_category_picker_trigger",
+                    newCategoryInputTestTag = "options_budget_category_picker_new_input",
+                    addCategoryButtonTestTag = "options_budget_category_picker_add"
+                )
+                if (selectedBudgetCategory.isNotBlank()) {
+                    Text(
+                        text = "선택된 카테고리: $selectedBudgetCategory",
+                        modifier = Modifier.testTag("options_budget_category_selected"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF475569)
+                    )
+                }
+                CleanField(
+                    modifier = Modifier.testTag("options_budget_category_amount"),
+                    value = categoryBudgetInput,
+                    onValueChange = { categoryBudgetInput = it.filter(Char::isDigit) },
+                    label = "카테고리 예산 (0 입력 시 삭제)",
+                    keyboardType = KeyboardType.Number
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        modifier = Modifier.testTag("options_budget_category_save"),
+                        enabled = selectedBudgetCategory.isNotBlank(),
+                        onClick = {
+                            onSetCategoryBudget(selectedBudgetCategory, categoryBudgetInput)
+                            categoryBudgetInput = ""
+                        }
+                    ) {
+                        Text("카테고리 예산 저장")
+                    }
+                    TextButton(
+                        modifier = Modifier.testTag("options_budget_category_delete"),
+                        enabled = selectedBudgetCategory.isNotBlank(),
+                        onClick = {
+                            onRemoveCategoryBudget(selectedBudgetCategory)
+                            categoryBudgetInput = ""
+                        }
+                    ) {
+                        Text("선택 예산 삭제", color = Color(0xFFB42318))
+                    }
+                }
+
                 if (state.budgetProgress.overBudgetMessages.isNotEmpty()) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -659,6 +730,72 @@ private fun ControlOptionSection(
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             state.budgetProgress.overBudgetMessages.forEach { Text(it, color = Color(0xFF9A3412)) }
+                        }
+                    }
+                }
+
+                if (state.budgetProgress.categoryProgress.isEmpty()) {
+                    Text("설정된 카테고리 예산이 없습니다.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
+                } else {
+                    state.budgetProgress.categoryProgress.forEach { progress ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (progress.remaining < 0L) Color(0xFFFFF1EC) else Color(0xFFF8FBFF)
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(progress.category, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        "${progress.used} / ${progress.budget}원",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF475569)
+                                    )
+                                }
+                                LinearProgressIndicator(
+                                    progress = {
+                                        if (progress.budget <= 0L) 0f
+                                        else (progress.used.toFloat() / progress.budget.toFloat()).coerceIn(0f, 1f)
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp),
+                                    color = if (progress.remaining < 0L) Color(0xFFDC2626) else Color(0xFF2563EB),
+                                    trackColor = Color(0xFFDCE7F5)
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "남은 예산: ${progress.remaining}원",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (progress.remaining < 0L) Color(0xFFB42318) else Color(0xFF166534)
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        TextButton(
+                                            onClick = {
+                                                selectedBudgetCategory = progress.category
+                                                categoryBudgetInput = progress.budget.toString()
+                                            }
+                                        ) {
+                                            Text("불러오기")
+                                        }
+                                        TextButton(onClick = { onRemoveCategoryBudget(progress.category) }) {
+                                            Text("삭제", color = Color(0xFFB42318))
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
