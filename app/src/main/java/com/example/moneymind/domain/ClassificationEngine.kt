@@ -144,9 +144,12 @@ class ClassificationEngine(
     }
 
     fun applyRuleIfMatched(entry: LedgerEntry, rules: List<ClassificationRule>): LedgerEntry {
-        if (rules.isEmpty()) return entry
+        val enabledRules = rules
+            .filter { it.enabled && it.keyword.isNotBlank() }
+            .sortedByDescending { it.keyword.length }
+        if (enabledRules.isEmpty()) return entry
 
-        val matchedRule = findMatchedRule(entry.description, entry.merchant, rules)
+        val matchedRule = findMatchedRule(entry.description, entry.merchant, enabledRules)
             ?: return entry
 
         val resolvedType = matchedRule.forcedType ?: entry.type

@@ -15,6 +15,7 @@ import com.example.moneymind.domain.CalendarMemo
 import com.example.moneymind.domain.ClassificationEngine
 import com.example.moneymind.domain.ClassificationRule
 import com.example.moneymind.domain.EntrySource
+import com.example.moneymind.domain.LedgerFingerprint
 import com.example.moneymind.domain.EntryType
 import com.example.moneymind.domain.InstallmentPlan
 import com.example.moneymind.domain.InternalTransferDetector
@@ -226,35 +227,43 @@ class LedgerRepository(
     suspend fun deleteClassificationRule(ruleId: String) {
         if (ruleId.isBlank()) return
         database.classificationRuleDao().deleteById(ruleId)
+        applyClassificationRulesToExistingEntries()
     }
 
     suspend fun applyClassificationRulesToExistingEntries() {
         val rules = database.classificationRuleDao().getAll().map { it.toDomain() }
-        if (rules.isEmpty()) return
-
-        val entries = database.ledgerDao().getAll().map { it.toDomain() }
-        entries.forEach { entry ->
-            val updated = classifier.applyRuleIfMatched(entry, rules)
-            if (
-                updated.type == entry.type &&
-                updated.spendingKind == entry.spendingKind &&
-                updated.category == entry.category &&
-                updated.countedInExpense == entry.countedInExpense
-            ) {
-                return@forEach
+        database.withTransaction {
+            val entities = database.ledgerDao().getAll()
+            entities.forEach { entity ->
+                val baseEntry = entity.toBaseDomain()
+                val updated = classifier.applyRuleIfMatched(baseEntry, rules)
+                val updatedFingerprint = entryFingerprint(baseEntry)
+                if (
+                    updatedFingerprint == entity.fingerprint &&
+                    updated.type.name == entity.type &&
+                    updated.spendingKind.name == entity.spendingKind &&
+                    updated.category == entity.category &&
+                    updated.countedInExpense == entity.countedInExpense
+                ) {
+                    return@forEach
+                }
+                database.ledgerDao().updateEntryById(
+                    id = entity.id,
+                    fingerprint = updatedFingerprint,
+                    occurredAtMillis = updated.occurredAt.toEpochMillis(),
+                    type = updated.type.name,
+                    amount = updated.amount,
+                    category = updated.category,
+                    description = encryptText(updated.description).orEmpty(),
+                    merchant = encryptText(updated.merchant),
+                    spendingKind = updated.spendingKind.name,
+                    countedInExpense = updated.countedInExpense,
+                    baseType = baseEntry.type.name,
+                    baseCategory = baseEntry.category,
+                    baseSpendingKind = baseEntry.spendingKind.name,
+                    baseCountedInExpense = baseEntry.countedInExpense
+                )
             }
-            database.ledgerDao().updateEntryById(
-                id = entry.id,
-                fingerprint = entryFingerprint(updated),
-                occurredAtMillis = updated.occurredAt.toEpochMillis(),
-                type = updated.type.name,
-                amount = updated.amount,
-                category = updated.category,
-                description = encryptText(updated.description).orEmpty(),
-                merchant = encryptText(updated.merchant),
-                spendingKind = updated.spendingKind.name,
-                countedInExpense = updated.type == EntryType.EXPENSE
-            )
         }
     }
 
@@ -350,26 +359,25 @@ class LedgerRepository(
     ) {
         if (entryId.isBlank() || amount <= 0L || description.isBlank()) return
 
+        val existing = database.ledgerDao().getById(entryId)?.toDomain() ?: return
         val resolvedKind = if (type == EntryType.EXPENSE) spendingKind else SpendingKind.NORMAL
         val resolvedCategory = category.trim().ifBlank {
             defaultCategoryFor(type = type, spendingKind = resolvedKind)
         }
-        val entryLike = LedgerEntry(
-            id = entryId,
+        val updated = existing.copy(
             occurredAt = occurredAt,
             amount = amount,
             type = type,
             category = resolvedCategory,
             description = description.trim(),
             merchant = merchant?.trim()?.takeIf { it.isNotEmpty() },
-            source = EntrySource.MANUAL,
             spendingKind = resolvedKind,
             countedInExpense = type == EntryType.EXPENSE
         )
 
         database.ledgerDao().updateEntryById(
             id = entryId,
-            fingerprint = entryFingerprint(entryLike),
+            fingerprint = entryFingerprint(updated),
             occurredAtMillis = occurredAt.toEpochMillis(),
             type = type.name,
             amount = amount,
@@ -377,7 +385,11 @@ class LedgerRepository(
             description = encryptText(description.trim()).orEmpty(),
             merchant = encryptText(merchant?.trim()?.takeIf { it.isNotEmpty() }),
             spendingKind = resolvedKind.name,
-            countedInExpense = type == EntryType.EXPENSE
+            countedInExpense = type == EntryType.EXPENSE,
+            baseType = updated.type.name,
+            baseCategory = updated.category,
+            baseSpendingKind = updated.spendingKind.name,
+            baseCountedInExpense = updated.countedInExpense
         )
     }
 
@@ -437,26 +449,35 @@ class LedgerRepository(
     suspend fun ingestParsedRecords(records: List<ParsedRecord>) {
         if (records.isEmpty()) return
 
-        val existing = database.ledgerDao().getRecent(3_000).map { it.toDomain() }
+        val recentEntities = database.ledgerDao().getRecent(3_000)
+        val existingBaseEntries = recentEntities.map { it.toBaseDomain() }
         val ownedAccounts = database.ownedAccountDao().getAll().map { it.toDomain() }
         val ownerAliases = database.ownerAliasDao().getAll().map { it.alias }.toSet()
         val rules = database.classificationRuleDao().getAll().map { it.toDomain() }
 
-        val classified = classifier.classifyRecords(
+        val baseClassified = classifier.classifyRecords(
             records = records,
-            existing = existing,
+            existing = existingBaseEntries,
             ownedAccounts = ownedAccounts,
             ownerAliases = ownerAliases,
-            classificationRules = rules
+            classificationRules = emptyList()
         )
 
-        val seenFingerprints = existing.map(::entryFingerprint).toMutableSet()
-        val deduplicated = classified.filter { entry ->
-            seenFingerprints.add(entryFingerprint(entry))
+        val baseFingerprints = baseClassified.map(::entryFingerprint)
+        val seenFingerprints = findPersistedFingerprints(baseFingerprints).toMutableSet()
+        val deduplicated = baseClassified.map { baseEntry ->
+            val updated = classifier.applyRuleIfMatched(baseEntry, rules)
+            Triple(updated, baseEntry, entryFingerprint(baseEntry))
+        }.filter { (_, _, fingerprint) ->
+            seenFingerprints.add(fingerprint)
         }
         if (deduplicated.isEmpty()) return
 
-        database.ledgerDao().insertIgnore(deduplicated.map { it.toEntity() })
+        database.ledgerDao().insertIgnore(
+            deduplicated.map { (entry, baseEntry, fingerprint) ->
+                entry.toEntity(fingerprint = fingerprint, baseEntry = baseEntry)
+            }
+        )
     }
 
     suspend fun ingestNotification(record: ParsedRecord) {
@@ -477,9 +498,18 @@ class LedgerRepository(
     private fun categoryBudgetKey(category: String): String = "CATEGORY:${category.lowercase()}"
 
     private fun entryFingerprint(entry: LedgerEntry): String {
-        val epochMinute = entry.occurredAt.atZone(zoneId).toEpochSecond() / 60
-        val normalizedDesc = entry.description.trim().lowercase()
-        return "$epochMinute|${entry.type}|${entry.amount}|$normalizedDesc"
+        return LedgerFingerprint.build(entry)
+    }
+
+    private suspend fun findPersistedFingerprints(fingerprints: List<String>): Set<String> {
+        val uniqueFingerprints = fingerprints.distinct()
+        if (uniqueFingerprints.isEmpty()) return emptySet()
+
+        val result = mutableSetOf<String>()
+        uniqueFingerprints.chunked(SQLITE_IN_LIMIT).forEach { chunk ->
+            result += database.ledgerDao().getExistingFingerprints(chunk)
+        }
+        return result
     }
 
     private fun LedgerEntryEntity.toDomain(): LedgerEntry {
@@ -503,7 +533,31 @@ class LedgerRepository(
         )
     }
 
-    private fun LedgerEntry.toEntity(fingerprint: String = entryFingerprint(this)): LedgerEntryEntity {
+    private fun LedgerEntryEntity.toBaseDomain(): LedgerEntry {
+        val type = runCatching { EntryType.valueOf(baseType) }.getOrDefault(EntryType.EXPENSE)
+        val source = runCatching { EntrySource.valueOf(source) }.getOrDefault(EntrySource.MANUAL)
+        val spendingKind = runCatching { SpendingKind.valueOf(baseSpendingKind) }.getOrDefault(SpendingKind.NORMAL)
+
+        return LedgerEntry(
+            id = id,
+            occurredAt = millisToDateTime(occurredAtMillis),
+            amount = amount,
+            type = type,
+            category = baseCategory,
+            description = decryptText(description).orEmpty(),
+            merchant = decryptText(merchant),
+            source = source,
+            spendingKind = spendingKind,
+            countedInExpense = baseCountedInExpense,
+            accountMask = accountMask,
+            counterpartyName = decryptText(counterpartyName)
+        )
+    }
+
+    private fun LedgerEntry.toEntity(
+        fingerprint: String = entryFingerprint(this),
+        baseEntry: LedgerEntry = this
+    ): LedgerEntryEntity {
         return LedgerEntryEntity(
             id = id,
             fingerprint = fingerprint,
@@ -516,6 +570,10 @@ class LedgerRepository(
             source = source.name,
             spendingKind = spendingKind.name,
             countedInExpense = countedInExpense,
+            baseType = baseEntry.type.name,
+            baseCategory = baseEntry.category,
+            baseSpendingKind = baseEntry.spendingKind.name,
+            baseCountedInExpense = baseEntry.countedInExpense,
             accountMask = accountMask,
             counterpartyName = encryptText(counterpartyName)
         )
@@ -648,5 +706,6 @@ class LedgerRepository(
 
     companion object {
         const val TOTAL_BUDGET_KEY = "TOTAL"
+        private const val SQLITE_IN_LIMIT = 900
     }
 }
