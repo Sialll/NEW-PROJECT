@@ -128,6 +128,8 @@ internal fun OptionsPage(
     onRemoveRule: (String) -> Unit,
     onCreateRuleFromEntry: (String, SpendingKind) -> Unit
 ) {
+    val context = LocalContext.current
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -191,6 +193,7 @@ internal fun OptionsPage(
                 }
                 item {
                     FileOptionSection(
+                        context = context,
                         onImport = onImport,
                         onExportBank = onExportBank,
                         onExportAnalysis = onExportAnalysis,
@@ -245,6 +248,7 @@ internal fun OptionsPage(
 
 @Composable
 private fun FileOptionSection(
+    context: Context,
     onImport: () -> Unit,
     onExportBank: () -> Unit,
     onExportAnalysis: () -> Unit,
@@ -293,6 +297,10 @@ private fun FileOptionSection(
                 }
             }
         }
+
+        PrivacyNoticeCard(
+            onOpenPolicy = { openPrivacyPolicy(context) }
+        )
     }
 }
 
@@ -1214,11 +1222,7 @@ private fun NotificationStatusCard(
             }
             Text(statusText)
             Text(
-                if (state.smsPermissionGranted) {
-                    "SMS 권한: 허용됨"
-                } else {
-                    "SMS 권한: 미허용 (앱 시작 시 요청 팝업)"
-                },
+                "거래 알림과 가져온 명세서는 기기에만 저장되며, 기본 상태에서는 외부 서버로 전송되지 않습니다.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF475569)
             )
@@ -1229,5 +1233,69 @@ private fun NotificationStatusCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PrivacyNoticeCard(
+    onOpenPolicy: () -> Unit
+) {
+    var showDialog by rememberSaveable { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF7F8FC))
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("개인정보 및 데이터 처리", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                "MoneyMind는 거래 알림, 사용자가 선택한 파일, 수동 입력 데이터를 기기 내부 DB에 저장합니다. " +
+                    "광고 SDK, 분석 SDK, 외부 동기화 서버는 기본 포함하지 않습니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF475569)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { showDialog = true }) {
+                    Text("앱 내 요약 보기")
+                }
+                Button(onClick = onOpenPolicy) {
+                    Text("개인정보처리방침 열기")
+                }
+            }
+        }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("개인정보 및 데이터 처리 요약") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    privacyNoticeSections.forEach { section ->
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(section.title, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                section.body,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF475569)
+                            )
+                        }
+                    }
+                    Text(
+                        "문서 URL: $privacyPolicyUrl",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF64748B)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDialog = false }) {
+                    Text("닫기")
+                }
+            }
+        )
     }
 }
