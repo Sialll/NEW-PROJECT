@@ -1,6 +1,7 @@
 package com.example.moneymind.domain
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
@@ -106,6 +107,33 @@ class ClassificationEngineTest {
         assertEquals(EntryType.EXPENSE, updated.type)
         assertEquals("일반지출", updated.category)
         assertTrue(updated.countedInExpense)
+    }
+
+    @Test
+    fun applyRuleIfMatched_withoutRules_restoresBaseClassification() {
+        val baseEntry = LedgerEntry(
+            occurredAt = LocalDateTime.of(2026, 2, 21, 9, 0),
+            amount = 30_000L,
+            type = EntryType.TRANSFER,
+            category = "내부계좌이체",
+            description = "토스 내 계좌 이체",
+            merchant = "토스",
+            source = EntrySource.EXCEL_IMPORT,
+            spendingKind = SpendingKind.NORMAL,
+            countedInExpense = false
+        )
+        val rule = ClassificationRule(
+            keyword = "토스 내 계좌 이체",
+            spendingKind = SpendingKind.NORMAL,
+            category = "일반지출",
+            forcedType = EntryType.EXPENSE
+        )
+
+        val updated = engine.applyRuleIfMatched(baseEntry, listOf(rule))
+        val restored = engine.applyRuleIfMatched(baseEntry, emptyList())
+
+        assertNotEquals(baseEntry.type, updated.type)
+        assertEquals(baseEntry, restored)
     }
 
     @Test

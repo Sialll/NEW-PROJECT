@@ -4,6 +4,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val tracingVersion = "1.3.0"
+
+configurations.configureEach {
+    resolutionStrategy.force("androidx.tracing:tracing:$tracingVersion")
+}
+
 val releaseStoreFile = providers.gradleProperty("MM_RELEASE_STORE_FILE")
     .orElse(providers.environmentVariable("MM_RELEASE_STORE_FILE"))
 val releaseStorePassword = providers.gradleProperty("MM_RELEASE_STORE_PASSWORD")
@@ -50,6 +56,7 @@ android {
         targetSdk = 35
         versionCode = 4
         versionName = "1.0.3"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     flavorDimensions += "edition"
@@ -144,7 +151,13 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.tracing:tracing:$tracingVersion")
+    androidTestImplementation("androidx.tracing:tracing:$tracingVersion")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     implementation("org.apache.commons:commons-csv:1.11.0")
     implementation("org.apache.poi:poi-ooxml:5.2.5")

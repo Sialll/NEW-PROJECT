@@ -43,7 +43,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 data class CategoryBudgetProgress(
     val category: String,
@@ -1115,28 +1114,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         targets: List<BudgetTarget>,
         month: YearMonth
     ): BudgetProgress {
-        val expenses = entries.filter {
-            it.type == EntryType.EXPENSE &&
-                it.countedInExpense &&
-                YearMonth.from(it.occurredAt) == month
-        }
-
-        val totalExpense = expenses.sumOf { it.amount }
-        val totalBudget = targets.firstOrNull { it.key == LedgerRepository.TOTAL_BUDGET_KEY }?.amount
-        val totalRemaining = totalBudget?.minus(totalExpense)
-
-        val overMessages = mutableListOf<String>()
-        if (totalRemaining != null && totalRemaining < 0L) {
-            overMessages += "총예산 초과 ${abs(totalRemaining)}원"
-        }
-
-        return BudgetProgress(
-            totalBudget = totalBudget,
-            totalExpense = totalExpense,
-            totalRemaining = totalRemaining,
-            categoryProgress = emptyList(),
-            overBudgetMessages = overMessages
-        )
+        return BudgetProgressCalculator.calculate(entries, targets, month)
     }
 
     private fun buildClosingPreview(

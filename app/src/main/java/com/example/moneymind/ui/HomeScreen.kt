@@ -159,8 +159,6 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
     var manualDesc by rememberSaveable { mutableStateOf("") }
     var manualMerchant by rememberSaveable { mutableStateOf("") }
     var manualCategory by rememberSaveable { mutableStateOf("") }
-    var manualSaveSignal by rememberSaveable { mutableLongStateOf(0L) }
-
     var optionSectionName by rememberSaveable { mutableStateOf(OptionSection.FILE.name) }
     var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(LocalDate.now().dayOfMonth) }
     var checkedEntryIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
@@ -254,22 +252,26 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                         TopNavButton(
                             label = "메인",
                             selected = pagerState.currentPage == 0,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(0) } }
+                            onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
+                            testTag = "top_nav_main"
                         )
                         TopNavButton(
                             label = "달력",
                             selected = pagerState.currentPage == 1,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(1) } }
+                            onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
+                            testTag = "top_nav_calendar"
                         )
                         TopNavButton(
                             label = "가계부",
                             selected = pagerState.currentPage == 2,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(2) } }
+                            onClick = { scope.launch { pagerState.animateScrollToPage(2) } },
+                            testTag = "top_nav_ledger"
                         )
                         TopNavButton(
                             label = "옵션",
                             selected = pagerState.currentPage == 3,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(3) } }
+                            onClick = { scope.launch { pagerState.animateScrollToPage(3) } },
+                            testTag = "top_nav_options"
                         )
                     }
                 }
@@ -316,7 +318,6 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                     manualMerchant = manualMerchant,
                     manualCategory = manualCategory,
                     categoryOptions = state.categoryOptions,
-                    manualSaveSignal = manualSaveSignal,
                     pinnedCategories = state.pinnedCategories,
                     onSelectDay = { selectedDayOfMonth = it },
                     onToggleChecked = { id ->
@@ -388,7 +389,6 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                             }
                             else -> {
                                 vm.addManualEntry(manualType, manualAmount, manualDesc, manualMerchant, manualCategory, manualKind)
-                                manualSaveSignal++
                                 manualAmount = ""
                                 manualDesc = ""
                                 manualMerchant = ""
@@ -478,6 +478,8 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
                         installmentMonthsInput = ""
                     },
                     onSetTotalBudget = vm::setTotalBudget,
+                    onSetCategoryBudget = vm::setCategoryBudget,
+                    onRemoveCategoryBudget = vm::removeCategoryBudget,
                     onCloseMonth = vm::closeCurrentMonth,
                     onClearAllRecords = vm::clearAllRecords,
                     onClearRecordsByPeriod = vm::clearRecordsByPeriod,

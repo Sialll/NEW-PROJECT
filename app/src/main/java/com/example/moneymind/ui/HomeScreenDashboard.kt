@@ -748,6 +748,40 @@ private fun BudgetProgressCard(progress: BudgetProgress) {
             if (progress.overBudgetMessages.isNotEmpty()) {
                 progress.overBudgetMessages.forEach { Text(it, color = Color(0xFFB42318)) }
             }
+            if (progress.categoryProgress.isNotEmpty()) {
+                Text("카테고리 예산", fontWeight = FontWeight.SemiBold, color = Color(0xFF345441))
+                progress.categoryProgress.forEach { categoryProgress ->
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(categoryProgress.category)
+                            Text(
+                                "${categoryProgress.used} / ${categoryProgress.budget}원",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF475569)
+                            )
+                        }
+                        LinearProgressIndicator(
+                            progress = {
+                                if (categoryProgress.budget <= 0L) 0f
+                                else (categoryProgress.used.toFloat() / categoryProgress.budget.toFloat()).coerceIn(0f, 1f)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp),
+                            trackColor = Color(0xFFDCE7F5),
+                            color = if (categoryProgress.remaining < 0L) Color(0xFFDC2626) else Color(0xFF4E6E9E)
+                        )
+                        Text(
+                            "남은 예산 ${categoryProgress.remaining}원",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (categoryProgress.remaining < 0L) Color(0xFFB42318) else Color(0xFF1C7A4F)
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -836,4 +870,3 @@ private fun SecurityStatusCard(enabled: Boolean) {
         }
     }
 }
-

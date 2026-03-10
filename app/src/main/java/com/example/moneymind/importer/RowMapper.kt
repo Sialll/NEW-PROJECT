@@ -5,6 +5,7 @@ import com.example.moneymind.domain.ParsedRecord
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.MonthDay
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -32,17 +33,25 @@ object RowMapper {
     private val descriptionKeys = listOf(
         "description",
         "memo",
-        "merchant",
         "detail",
         "적요",
+        "거래내용",
+        "요약",
+        "비고"
+    )
+    private val merchantKeys = listOf(
+        "merchant",
+        "payee",
+        "store",
         "내용",
         "가맹점",
         "이용가맹점",
-        "거래내용",
         "거래처",
         "사용처",
         "상호명",
-        "상대명"
+        "상호",
+        "상대명",
+        "거래상대"
     )
     private val amountKeys = listOf(
         "amount",
@@ -104,6 +113,16 @@ object RowMapper {
     private val counterpartyKeys = listOf(
         "counterparty", "name", "상대명", "거래상대", "예금주", "보낸분", "받는분", "수취인"
     )
+    private val timeKeys = listOf(
+        "time",
+        "transactiontime",
+        "거래시간",
+        "시간",
+        "시각",
+        "승인시간",
+        "결제시간",
+        "이용시간"
+    )
 
     private val dateTimeFormatters = listOf(
         "yyyy-MM-dd HH:mm:ss",
@@ -139,11 +158,22 @@ object RowMapper {
         "M.d"
     ).map { DateTimeFormatter.ofPattern(it, locale) }
 
+    private val timeFormatters = listOf(
+        "HH:mm:ss",
+        "HH:mm",
+        "H:mm:ss",
+        "H:mm",
+        "a h:mm:ss",
+        "a h:mm"
+    ).map { DateTimeFormatter.ofPattern(it, locale) }
+
     fun mapRow(row: Map<String, String>, source: EntrySource): ParsedRecord? {
         val normalized = normalizeKeys(row)
         val dateText = findFirst(normalized, dateKeys) ?: return null
+        val merchant = findFirst(normalized, merchantKeys)
         val description = findFirst(normalized, descriptionKeys)
             .orEmpty()
+            .ifBlank { merchant.orEmpty() }
             .ifBlank { "Uncategorized transaction" }
 
         val withdraw = findFirst(normalized, withdrawKeys)?.let(::parseAmount)
@@ -157,13 +187,16 @@ object RowMapper {
             else -> return null
         }
 
-        val occurredAt = parseDate(dateText) ?: return null
+        val occurredAt = resolveOccurredAt(
+            dateText = dateText,
+            timeText = findFirst(normalized, timeKeys)
+        ) ?: return null
 
         return ParsedRecord(
             occurredAt = occurredAt,
             signedAmount = signed,
             description = description,
-            merchant = findFirst(normalized, descriptionKeys),
+            merchant = merchant,
             accountMask = findFirst(normalized, accountKeys),
             fromAccountMask = findFirst(normalized, fromKeys),
             toAccountMask = findFirst(normalized, toKeys),
@@ -208,6 +241,16 @@ object RowMapper {
         }
     }
 
+    private fun resolveOccurredAt(dateText: String, timeText: String?): LocalDateTime? {
+        val parsedDateTime = parseDate(dateText) ?: return null
+        if (timeText.isNullOrBlank() || containsExplicitTime(dateText)) {
+            return parsedDateTime
+        }
+
+        val parsedTime = parseTime(timeText) ?: return parsedDateTime
+        return parsedDateTime.toLocalDate().atTime(parsedTime)
+    }
+
     fun parseDate(text: String, baseDate: LocalDate = LocalDate.now()): LocalDateTime? {
         val sanitized = normalizeDateText(text)
 
@@ -237,6 +280,22 @@ object RowMapper {
         }
 
         return null
+    }
+
+    private fun parseTime(text: String): LocalTime? {
+        val sanitized = text.trim().replace(Regex("\\s+"), " ")
+        timeFormatters.forEach { formatter ->
+            try {
+                return LocalTime.parse(sanitized, formatter)
+            } catch (_: DateTimeParseException) {
+                // try next formatter
+            }
+        }
+        return null
+    }
+
+    private fun containsExplicitTime(text: String): Boolean {
+        return Regex("\\d{1,2}:\\d{2}(:\\d{2})?").containsMatchIn(text)
     }
 
     private fun normalizeDateText(text: String): String {

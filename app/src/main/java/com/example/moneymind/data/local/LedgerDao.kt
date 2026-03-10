@@ -14,8 +14,14 @@ interface LedgerDao {
     @Query("SELECT * FROM ledger_entries")
     suspend fun getAll(): List<LedgerEntryEntity>
 
+    @Query("SELECT * FROM ledger_entries WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): LedgerEntryEntity?
+
     @Query("SELECT * FROM ledger_entries ORDER BY occurredAtMillis DESC LIMIT :limit")
     suspend fun getRecent(limit: Int): List<LedgerEntryEntity>
+
+    @Query("SELECT fingerprint FROM ledger_entries WHERE fingerprint IN (:fingerprints)")
+    suspend fun getExistingFingerprints(fingerprints: List<String>): List<String>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnore(entries: List<LedgerEntryEntity>): List<Long>
@@ -34,7 +40,11 @@ interface LedgerDao {
             description = :description,
             merchant = :merchant,
             spendingKind = :spendingKind,
-            countedInExpense = :countedInExpense
+            countedInExpense = :countedInExpense,
+            baseType = :baseType,
+            baseCategory = :baseCategory,
+            baseSpendingKind = :baseSpendingKind,
+            baseCountedInExpense = :baseCountedInExpense
         WHERE id = :id
         """
     )
@@ -48,7 +58,11 @@ interface LedgerDao {
         description: String,
         merchant: String?,
         spendingKind: String,
-        countedInExpense: Boolean
+        countedInExpense: Boolean,
+        baseType: String,
+        baseCategory: String,
+        baseSpendingKind: String,
+        baseCountedInExpense: Boolean
     )
 
     @Query("DELETE FROM ledger_entries WHERE id = :id")

@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ClassificationRuleEntity::class,
         CalendarMemoEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class MoneyMindDatabase : RoomDatabase() {
@@ -181,6 +181,32 @@ abstract class MoneyMindDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE ledger_entries ADD COLUMN baseType TEXT NOT NULL DEFAULT 'EXPENSE'"
+                )
+                db.execSQL(
+                    "ALTER TABLE ledger_entries ADD COLUMN baseCategory TEXT NOT NULL DEFAULT ''"
+                )
+                db.execSQL(
+                    "ALTER TABLE ledger_entries ADD COLUMN baseSpendingKind TEXT NOT NULL DEFAULT 'NORMAL'"
+                )
+                db.execSQL(
+                    "ALTER TABLE ledger_entries ADD COLUMN baseCountedInExpense INTEGER NOT NULL DEFAULT 1"
+                )
+                db.execSQL(
+                    """
+                    UPDATE ledger_entries
+                    SET baseType = type,
+                        baseCategory = category,
+                        baseSpendingKind = spendingKind,
+                        baseCountedInExpense = countedInExpense
+                    """.trimIndent()
+                )
+            }
+        }
+
         @Volatile
         private var instance: MoneyMindDatabase? = null
 
@@ -195,6 +221,7 @@ abstract class MoneyMindDatabase : RoomDatabase() {
                     .addMigrations(MIGRATION_2_3)
                     .addMigrations(MIGRATION_3_4)
                     .addMigrations(MIGRATION_4_5)
+                    .addMigrations(MIGRATION_5_6)
                     .build()
                     .also { instance = it }
             }

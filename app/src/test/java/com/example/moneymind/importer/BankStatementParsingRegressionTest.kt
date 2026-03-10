@@ -26,6 +26,10 @@ class BankStatementParsingRegressionTest {
         assertNotNull(parsed)
         assertEquals(175L, parsed!!.signedAmount)
         assertEquals("타행인터넷뱅킹", parsed.description)
+        assertEquals("KR-GOOGLE", parsed.merchant)
+        assertEquals(7, parsed.occurredAt.hour)
+        assertEquals(10, parsed.occurredAt.minute)
+        assertEquals(12, parsed.occurredAt.second)
     }
 
     @Test
@@ -89,4 +93,3 @@ class BankStatementParsingRegressionTest {
         assertEquals(-11992L, parsed[1].signedAmount)
     }
 }
-

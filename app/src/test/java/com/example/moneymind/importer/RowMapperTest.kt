@@ -4,6 +4,7 @@ import com.example.moneymind.domain.EntrySource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
+import java.time.LocalTime
 
 class RowMapperTest {
     @Test
@@ -37,6 +38,35 @@ class RowMapperTest {
     }
 
     @Test
+    fun splitDateAndTimeRow_preservesTimeOfDay() {
+        val row = mapOf(
+            "거래일자" to "2026-02-21",
+            "거래시간" to "07:10:12",
+            "적요" to "타행인터넷뱅킹",
+            "입금액" to "175.0"
+        )
+
+        val parsed = RowMapper.mapRow(row, EntrySource.EXCEL_IMPORT)
+        assertNotNull(parsed)
+        assertEquals(LocalTime.of(7, 10, 12), parsed?.occurredAt?.toLocalTime())
+    }
+
+    @Test
+    fun separateMerchantColumn_isNotOverwrittenByDescription() {
+        val row = mapOf(
+            "거래일자" to "2026-02-21",
+            "적요" to "타행인터넷뱅킹",
+            "내용" to "KR-GOOGLE",
+            "입금액" to "175.0"
+        )
+
+        val parsed = RowMapper.mapRow(row, EntrySource.EXCEL_IMPORT)
+        assertNotNull(parsed)
+        assertEquals("타행인터넷뱅킹", parsed?.description)
+        assertEquals("KR-GOOGLE", parsed?.merchant)
+    }
+
+    @Test
     fun dateParser_supportsKoreanDateFormat() {
         val parsed = RowMapper.parseDate("2026년 02월 20일")
         assertNotNull(parsed)
@@ -45,4 +75,3 @@ class RowMapperTest {
         assertEquals(20, parsed?.dayOfMonth)
     }
 }
-

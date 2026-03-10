@@ -23,6 +23,10 @@ data class LedgerEntryEntity(
     val source: String,
     val spendingKind: String,
     val countedInExpense: Boolean,
+    val baseType: String,
+    val baseCategory: String,
+    val baseSpendingKind: String,
+    val baseCountedInExpense: Boolean,
     val accountMask: String?,
     val counterpartyName: String?
 )
