@@ -1,6 +1,5 @@
 ﻿package com.example.moneymind.ui
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
@@ -163,9 +162,6 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
     var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(LocalDate.now().dayOfMonth) }
     var checkedEntryIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
     var pendingExportType by rememberSaveable { mutableStateOf(CsvExportType.ANALYSIS.name) }
-    var showSmsPermissionDialog by rememberSaveable { mutableStateOf(false) }
-    var smsPromptShownInSession by rememberSaveable { mutableStateOf(false) }
-
     var editingEntryId by rememberSaveable { mutableStateOf<String?>(null) }
     var editTypeName by rememberSaveable { mutableStateOf(EntryType.EXPENSE.name) }
     var editKindName by rememberSaveable { mutableStateOf(SpendingKind.NORMAL.name) }
@@ -183,27 +179,15 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
 
     LaunchedEffect(Unit) {
         vm.refreshNotificationAccess()
-        vm.refreshSmsPermissionAccess()
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 vm.refreshNotificationAccess()
-                vm.refreshSmsPermissionAccess()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    LaunchedEffect(state.smsPermissionGranted, state.notificationCaptureSupported) {
-        if (
-            !smsPromptShownInSession &&
-            state.notificationCaptureSupported &&
-            !state.smsPermissionGranted
-        ) {
-            showSmsPermissionDialog = true
-            smsPromptShownInSession = true
-        }
     }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -216,10 +200,6 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
             vm.exportCsv(context, it, exportType)
         }
     }
-    val smsPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        vm.refreshSmsPermissionAccess()
-    }
-
     LaunchedEffect(state.lastInfo) {
         val infoMessage = state.lastInfo
         if (!infoMessage.isNullOrBlank()) {
@@ -619,34 +599,6 @@ fun HomeScreen(vm: HomeViewModel = viewModel()) {
             dismissButton = {
                 TextButton(onClick = { deleteTargetEntryId = null }) {
                     Text("취소")
-                }
-            }
-        )
-    }
-
-    if (showSmsPermissionDialog && !state.smsPermissionGranted) {
-        AlertDialog(
-            onDismissRequest = { showSmsPermissionDialog = false },
-            title = { Text("SMS 접근 권한 요청") },
-            text = {
-                Text(
-                    "결제 문자 자동 수집 준비를 위해 SMS 읽기 권한을 요청합니다. " +
-                        "거부해도 앱 사용은 가능하고, 알림 수집은 계속 동작합니다."
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showSmsPermissionDialog = false
-                        smsPermissionLauncher.launch(Manifest.permission.READ_SMS)
-                    }
-                ) {
-                    Text("권한 요청")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSmsPermissionDialog = false }) {
-                    Text("나중에")
                 }
             }
         )

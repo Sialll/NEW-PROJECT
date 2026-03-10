@@ -1,12 +1,10 @@
 ﻿package com.example.moneymind.ui
 
-import android.Manifest
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.moneymind.BuildConfig
@@ -125,7 +123,6 @@ data class HomeUiState(
     val encryptionEnabled: Boolean = true,
     val notificationCaptureSupported: Boolean = BuildConfig.NOTIFICATION_CAPTURE_ENABLED,
     val notificationAccessEnabled: Boolean = false,
-    val smsPermissionGranted: Boolean = false,
     val lastError: String? = null,
     val lastInfo: String? = null
 ) {
@@ -148,7 +145,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         refreshNotificationAccess()
         refreshNotificationSourceOptions()
-        refreshSmsPermissionAccess()
         bootstrapRecurringEntries()
         observePersistedState()
     }
@@ -856,16 +852,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         _uiState.update { it.copy(notificationSourceOptions = options) }
-    }
-
-    fun refreshSmsPermissionAccess() {
-        val context = getApplication<Application>().applicationContext
-        val granted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.READ_SMS
-        ) == PackageManager.PERMISSION_GRANTED
-
-        _uiState.update { it.copy(smsPermissionGranted = granted) }
     }
 
     private fun bootstrapRecurringEntries() {
