@@ -2,6 +2,7 @@
 .gradle/
 **/build/
 local.properties
+.local/
 
 # IDE
 .idea/
