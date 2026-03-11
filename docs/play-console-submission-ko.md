@@ -14,23 +14,33 @@
 
 `알림·명세서 가져오기로 빠르게 기록하는 개인용 가계부`
 
-### 자세한 설명
+### 자세한 설명 최종본
 
-`MoneyMind`는 개인이 혼자 쓰기 좋은 안드로이드 가계부입니다.
+`MoneyMind`는 개인 사용자를 위한 안드로이드 가계부 앱입니다. 결제 및 입출금 알림을 바탕으로 거래를 빠르게 기록하고, CSV/XLS/XLSX/PDF 명세서를 가져와 과거 내역도 한 번에 정리할 수 있습니다.
 
-- 금융 앱 알림을 읽어 결제/입출금 내역을 빠르게 기록
-- CSV, XLS/XLSX, PDF 명세서 가져오기 지원
+주요 기능:
+
+- 금융 앱 알림 기반 자동 기록
+- CSV, XLS/XLSX, PDF 명세서 가져오기
 - 수입, 지출, 내부이체 자동 분류
 - 카테고리 예산과 월말 정산 확인
-- 분석용/은행용 CSV 내보내기 지원
+- 은행용/분석용 CSV 내보내기
 
-앱은 사용자가 허용한 알림과 직접 선택한 파일, 수동 입력 데이터를 바탕으로 가계부를 정리합니다. 데이터는 기본적으로 기기 내부에 저장되며, 광고 SDK나 외부 동기화 서버를 기본 포함하지 않습니다.
+MoneyMind는 복잡한 공유 기능보다 개인 기록과 월별 소비 점검에 집중합니다. 사용자가 허용한 알림, 직접 선택한 파일, 수동 입력 데이터를 기반으로 가계부를 구성하며, 데이터는 기본적으로 기기 내부에 저장됩니다.
 
-MoneyMind는 복잡한 공유 기능보다 개인 기록과 월별 소비 점검에 집중한 가계부 앱입니다. 알림 자동 기록, 파일 가져오기, 예산 진행도, 카테고리 정리를 한곳에서 관리할 수 있습니다.
+광고 SDK나 외부 동기화 서버를 기본 포함하지 않으며, 빠르게 기록하고 직접 점검하는 개인형 가계부 경험에 초점을 맞췄습니다.
 
-### 출시 노트
+### 자세한 설명 짧은 대안
 
-`첫 공개 버전입니다. 알림 기반 자동 기록, 명세서 가져오기, 카테고리 예산, CSV 내보내기를 지원합니다.`
+`MoneyMind`는 알림과 명세서 가져오기로 거래를 빠르게 정리할 수 있는 개인용 가계부입니다. 금융 앱 알림 자동 기록, CSV/XLS/XLSX/PDF 가져오기, 자동 분류, 카테고리 예산, CSV 내보내기를 한곳에서 지원합니다. 데이터는 기본적으로 기기 내부에 저장되며, 개인 기록과 월별 소비 점검에 집중한 구조로 설계되었습니다.`
+
+### 출시 노트 최종본
+
+`첫 공개 버전입니다. 알림 기반 자동 기록, 명세서 가져오기, 카테고리 예산, 월말 정산, CSV 내보내기를 지원합니다.`
+
+### 출시 노트 짧은 대안
+
+`알림 자동 기록, 명세서 가져오기, 예산 관리 기능을 포함한 첫 공개 버전입니다.`
 
 ## 2. Play Console 입력 초안
 
@@ -96,25 +106,36 @@ MoneyMind는 복잡한 공유 기능보다 개인 기록과 월별 소비 점검
 - 전체 기록 초기화
 - 공장초기화
 
-## 5. 리뷰어 메모 초안
+## 5. 리뷰어 메모 최종본
 
-아래 문구를 Play Console의 리뷰 메모에 넣는 것을 권장합니다.
+아래 문구를 Play Console `App access` 또는 리뷰 메모에 그대로 넣는 것을 권장합니다.
 
-`MoneyMind is a personal finance ledger app.`
+```text
+MoneyMind is a personal finance ledger app for individual users.
 
-`Core behavior:`
+Core behavior:
+- The app records supported financial app notifications locally after the user enables Notification Access in Android settings.
+- The app can also import user-selected CSV, XLS/XLSX, and PDF statements.
+- Imported and captured transaction data is stored on-device only in the default build.
+- The public release does not request SMS or Call Log permissions.
+- No advertising SDK or external sync server is included in the default build.
 
-- `The app records financial app notifications locally after the user enables Notification Access in Android settings.`
-- `The app also imports user-selected CSV/XLSX/PDF statements and stores them on-device only.`
-- `The public release does not request SMS or Call Log permissions.`
-- `No advertising SDK or external sync server is included in the default build.`
+How to test:
+1. Launch the app.
+2. Open the "옵션" tab and go to the "파일" section.
+3. Tap "알림 접근 권한 열기" and enable MoneyMind in Android Notification Access settings.
+4. Return to the app.
+5. Use the import action to select a statement file, or use the test notification buttons to verify local transaction capture and classification behavior.
+```
 
-`How to test:`
+### 리뷰어 메모 짧은 대안
 
-1. `Launch the app.`
-2. `Open Options > File.`
-3. `Tap "알림 접근 권한 열기" and enable MoneyMind in Android notification access settings.`
-4. `Return to the app and use the import buttons or test notification buttons to verify transaction capture and classification.`
+```text
+This app is a personal finance ledger.
+It stores supported financial notifications and imported statement files locally on-device.
+The public release does not request SMS or Call Log permissions.
+To test, open Options > File, enable Notification Access for MoneyMind, then import a statement file or trigger a test notification.
+```
 
 ## 6. 제출 직전 체크리스트
 
